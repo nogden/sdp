@@ -10,4 +10,4 @@
  {:project 'sdp
   :version "0.1.0"
   :description "A library for parsing and emitting Session Description Protocol."}
- repl {:init-ns 'sdp} )
+ repl {:init-ns 'sdp.core} )
