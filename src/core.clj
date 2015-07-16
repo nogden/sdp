@@ -48,28 +48,14 @@
    u=http://www.example.com/seminars/sdp.pdf
    e=j.doe@example.com (Jane Doe)
    c=IN IP4 224.2.17.12/127
-   t=2873397496 2873404696value
+   t=2873397496 2873404696
    r=7d 1h 0 25h
    a=recvonly
    m=audio 49170 RTP/AVP 0
    m=video 51372 RTP/AVP 99
    a=rtpmap:99 h263-1998/90000")
 
-(defn- throw-if-nil [issue func]
-  (fn [value]
-    (if (nil? (func value))
-      (throw (Exception. issue))
-      value)))
-
-(def parse-fns
-  "The set of functions used to parse individual SDP field types."
-  {:string identity
-   :integer #(Integer/parseInt %)
-   :numeric-string (throw-if-nil "String '%v' is not alphanumeric"
-                                 #(re-matches #"[0-9|A-Z|a-z]*" %))
-   :instant #(Integer/parseInt %)
-   :duration identity
-   :connection-address identity})
+(into [] prep-fields (string/split-lines test-sdp-string))
 
 (def error-fns
   "The set of error handlers."
@@ -85,7 +71,8 @@
               (update-in sdp [:errors] (fnil conj []) error-string)))})
 
 ;; (parse test-sdp-string)
-(def sdp-description
+
+(def sdp-format
   "The programatic description of the SDP format."
   {:sections
    ;; As defined in RFC 4566 page 8.
@@ -113,155 +100,176 @@
      ["c" :connection :zero-or-one]
      ["b" :bandwidth :zero-or-one]
      ["k" :encryption-keys :zero-or-one]
-     ["a" :attributes :zero-or-more]]}
+     ["a" :attributes :zero-or-more]]}})
 
-   :parse-rules
-   {"v" {:parse-as :integer
-         :on-fail [[:default-to 0]
-                   [:warn "Invalid version '%v', assuming default of '0'."]]}
-    "o" {:parse-as {:separator #"\s+"
-                    :fields [:username        [:string]
-                             :session-id      [:numeric-string #{}
-                                               :warn "Session id '%v' is not numeric"]
-                             :session-version [:string]
-                             :network-type    [:string #{"IN"}
-                                               :debug "Non-standard network-type '%v'"]
-                             :address-type    [:string #{"IP4" "IP6"}
-                                               :debug "Non-standard address-type '%v'"]
-                             :unicast-address [:string]]}
-         :on-fail [[:error "Invalid origin line (o=)."]]}
-    "s" {:parse-as :string
-         :on-fail [[:default-to " "]
-                   [:warn "Invalid empty session name, assuming default of '%d'."]]}
-    "i" {:parse-as :string}
-    "u" {:parse-as :string}
-    "e" {:parse-as :string}
-    "p" {:parse-as :string}
-    "c" {:parse-as {:separator #"\s+"
-                    :fields [:network-type       [:string #{"IN"}
-                                                  :debug "Non-standard network-type '%v'"]
-                             :address-type       [:string #{"IP4" "IP6"}
-                                                  :debug "Non-standard address-type '%v'"]
-                             :connection-address [:connection-address  ;; Must pass full field.
-                                                  :error "Invalid connection-address '%v'"]]}
-         :on-fail [[:error "Invalid connection line (c=)."]]}
-    "b" {:parse-as {:separator #":"
-                    :fields [:bandwidth-type [:string #{"CT" "AS"}
-                                              :debug "Non-standard bandwidth-type '%v'"]
-                             :bandwidth      [:integer
-                                              :error "Bandwidth value '%v' is not an integer"]]}
-         :on-fail [[:warn "Invalid bandwidth line (b=)."]]}
-    "z" {:parse-as {:separator #" "
-                    :fields [:adjustment-time [:instant
-                                               :warn "Adjustment value '%v' is not a time"]
-                             :offset          [:duration
-                                               :warn "Offset value '%v' is not a duration"]]}
-         :on-fail [[:warn "Invalid time zone line (z=)."]]
-         :options #{:repeats}}  ;; Repeat feild parsing, is this the best way to represent this.
-    "k" {:parse-as {:separator #":"
-                    :fields [:method [:string #{"clear" "base64" "uri" "prompt"}
-                                      :debug "Non-standard encryption method '%v'"]
-                             :payload [:string]]}
-         :on-fail [[:warn "Invalid encryprion keys line (k=)."]]}
-    "a" {:parse-as {:separator #":"
-                    :fields [:attribute [:string]
-                             :value [:string]]}
-         :on-fail [[:warn "Invalid attribute line (a=)."]]}
-    "t" {:parse-as {:separator #"\s+"
-                    :fields [:start-time [:instant
-                                          :error "Start time '%v' is not a time"]
-                             :end-time   [:instant
-                                          :error "End time '%v' is not a time"]]}
-         :on-fail [[:warn "Invalid timing line (t=)."]]}
-    "r" {:parse-as {:separator #"\s+"
-                    :fields [:repeat-interval [:duration
-                                               :error "Repeat interval '%v' is not a duration"]
-                             :active-duration [:duration
-                                               :error "Active duration '%v' is not a duration"]
-                             :offsets-from-start [:duration
-                                                  :error "Invalid offsets list '%v'"
-                                                  :collate]]}
-         :on-fail [[:warn "Invalid repeat line (r=)."]]}}})
+(def structure
+  {:session
+   {:v {:on-fail [[:default-to 0]
+                  [:warn "Invalid version '%v', assuming default of '0'."]]
+        :allowed-next #{:o}}
+    :o {:on-fail [[:error "Invalid origin line (o=)."]]
+        :allowed-next #{:s}}
+    :s {:on-fail [[:default-to " "]
+                  [:warn "Invalid empty session name, assuming default of '%d'."]]
+        :allowed-next #{:i :u :e :p :c :b :t :z :k :a :m}}
+    :i {:allowed-next #{:u :e :p :c :b :t :z :k :a :m}}
+    :u {:allowed-next #{:e :p :c :b :t :z :k :a :m}}
+    :e {:allowed-next #{:e :p :c :b :t :z :k :a :m}}
+    :p {:allowed-next #{:p :c :b :t :z :k :a :m}}
+    :c {:on-fail [[:error "Invalid connection line (c=)."]]
+        :allowed-next #{:b :t :z :k :a :m}}
+    :b {:on-fail [[:warn "Invalid bandwidth line (b=)."]]
+        :allowed-next #{:t :z :k :a :m}}
+    :t {:on-fail [[:warn "Invalid timing line (t=)."]]
+        :allowed-next #{:t :r :z :k :a :m}}
+    :r {:on-fail [[:warn "Invalid repeat line (r=)."]]
+        :allowed-next #{:t :z :k :a :m}}
+    :z {:on-fail [[:warn "Invalid time zone line (z=)."]]
+        :options #{:repeats}
+        :allowed-next #{:k :a :m}}
+    :k {:on-fail [[:warn "Invalid encryprion keys line (k=)."]]
+        :allowed-next #{:a :m}}
+    :a {:on-fail [[:warn "Invalid attribute line (a=)."]]
+        :allowed-next #{:a :m}}}
+   :media
+   {:m {:allowed-next #{:m :i :c :b :k :a}}
+    :i {:allowed-next #{:m :c :b :k :a}}
+    :c {:allowed-next #{:m :b :k :a}}
+    :b {:allowed-next #{:m :k :a}}
+    :k {:allowed-next #{:m :a}}
+    :a {:allowed-next #{:m :a}}}})
 
-(def operations
-  {:match {:one-only     :parse-and-advance
-           :zero-or-one  :parse-and-advance
-           :zero-or-more :parse
-           :one-or-more  :parse}
-   :no-match {:one-only     :missing-line
-              :zero-or-one  :advance
-              :zero-or-more :advance
-              :one-or-more  :check-previous}
-   :section {:one-only     :section-and-advance
-             :zero-or-one  :section-and-advance
-             :zero-or-more :check
-             :}})
+(defn- throw-if-nil [issue func]
+  (fn [value]
+    (if (nil? (func value))
+      (throw (Exception. issue))
+      value)))
 
-(defn invalid [sdp [letter name _ :as rule]]
-  (update-in sdp [:errors] (fnil conj [])
-             {:message (str "Missing mandatory '" name "' line (" letter "=)")
-              :rule rule :line :unknown}))
+(def parse-rules
+  "The rules that determine how each field is parsed."
+  {:v :integer
+   :o {:separator #"\s+"
+       :fields [:username        [:string]
+                :session-id      [:numeric-string #{}
+                                  :warn "Session id '%v' is not numeric"]
+                :session-version [:string]
+                :network-type    [:string #{"IN"}
+                                  :debug "Non-standard network-type '%v'"]
+                :address-type    [:string #{"IP4" "IP6"}
+                                  :debug "Non-standard address-type '%v'"]
+                :unicast-address [:string]]}
+   :s :string
+   :i :string
+   :u :string
+   :e :string
+   :p :string
+   :c {:separator #"\s+"
+       :fields [:network-type       [:string #{"IN"}
+                                     :debug "Non-standard network-type '%v'"]
+                :address-type       [:string #{"IP4" "IP6"}
+                                     :debug "Non-standard address-type '%v'"]
+                :connection-address [:connection-address  ;; Must pass full field.
+                                     :error "Invalid connection-address '%v'"]]}
+   :b {:separator #":"
+       :fields [:bandwidth-type [:string #{"CT" "AS"}
+                                 :debug "Non-standard bandwidth-type '%v'"]
+                :bandwidth      [:integer
+                                 :error "Bandwidth value '%v' is not an integer"]]}
+   :t {:separator #"\s+"
+       :fields [:start-time [:instant
+                             :error "Start time '%v' is not a time"]
+                :end-time   [:instant
+                             :error "End time '%v' is not a time"]]}
+   :r {:separator #"\s+"
+       :fields [:repeat-interval [:duration
+                                  :error "Repeat interval '%v' is not a duration"]
+                :active-duration [:duration
+                                  :error "Active duration '%v' is not a duration"]
+                :offsets-from-start [:duration
+                                     :error "Invalid offsets list '%v'"
+                                     :collate]]}
+   :z {:separator #" "
+       :fields [:adjustment-time [:instant
+                                  :warn "Adjustment value '%v' is not a time"]
+                :offset          [:duration
+                                  :warn "Offset value '%v' is not a duration"]]}
+   :k {:separator #":"
+       :fields [:method [:string #{"clear" "base64" "uri" "prompt"}
+                         :debug "Non-standard encryption method '%v'"]
+                :payload [:string]]}
+   :a {:separator #":"
+       :fields [:attribute [:string]
+                :value [:string]]}
+   :m {:separator #"\s+"
+       :fields [:media [:string #{"audio" "video" "text" "application" "message"}]
+                :port [:port]
+                :protocol [:string #{"udp" "RTP/AVP" "RTP/SAVP"}]
+                :format [:string]]}})
 
-(defn parse-fields
-  "Extract fields from line according to rule."
-  [line [_ line-type & options]]
-  :field-parsing-not-implemented)
+(def parse-fns
+  "The set of functions used to parse individual SDP field types."
+  {:string identity
+   :integer #(Integer/parseInt %)
+   :numeric-string (throw-if-nil "String '%v' is not alphanumeric"
+                                 #(re-matches #"[0-9|A-Z|a-z]*" %))
+   :instant #(Integer/parseInt %)
+   :duration identity
+   :connection-address identity})
 
-(defn parse-line
-  "Parse line accroding to the rule."
-  [sdp line [line-name line-type {options :options} :as rule]]
-  (let [result (cond
-                (map? line-type) (parse-fields line rule)
-                :else ((line-type parse-fns) line))]
-    (assoc sdp line-name result)))
+(defn mapify
+  "Splits an SDP line into a map of its component parts"
+  [line]
+  (let [[k v] (string/split line #"=" 2)]
+    {:type (keyword (string/trim k)) :value (string/triml v)}))
 
-(with-handler! #'parse-line
-  "Handle parsing errors according to the error rules."
-  Exception
-  (fn [e & [sdp line [line-name _ {error-spec :on-fail}]]]
-    (letfn [(handle-errors [sdp [op param]]
-             ((op error-fns) sdp line-name line param))]
-      (reduce handle-errors sdp error-spec))))
+(defn add-line-numbers
+  "A stateful transducer that adds a line number to each line."
+  [xf]
+  (let [line-number (volatile! 0)]
+    (fn ([] (xf))
+        ([result] (xf result))
+        ([result input]
+         (xf result (assoc input :line-number (vswap! line-number inc)))))))
 
-(defn parse-sdp [[sdp parse-rules] [k v line-num :as line]]
-  (let [[line-key line-name cardinality :as rule] (first parse-rules)
-        match (condp = line-key
-                k        :match
-                :section k
-                :no-match)]
-     (if (= line-key :section)
-       (do
-         (parse-sdp [sdp (get-in sdp-description [:sections line-name])] line)
-         :handle-sections)
-       (case (get-in operations [match cardinality])
-         :parse-and-advance [(parse-line sdp rule v) (drop 1 parse-rules)]
-         :parse             [(parse-line sdp rule v) parse-rules]
-         :advance           (recur [sdp (drop 1 parse-rules)] line)
-         :missing-line      (reduced [(invalid sdp rule) parse-rules])
-         ;; Could add section rules here?
-         ))))
+(defn add-sections
+  "A stateful transducer that adds the a section identifier to each line."
+  [xf]
+  (let [section (volatile! :session)]
+    (fn ([] (xf))
+        ([result] (xf result))
+        ([result {line-type :type :as input}]
+         (when (= :m line-type)
+           (vreset! section :media))
+         (xf result (assoc input :section @section))))))
 
-(def split-fields
-  "A transducer that splits an SDP line into its line-type and value fields."
-  (map #(string/split % #"=" 2)))
-
-(def trim-line-types
-  "A transducer that trims whitespace from key-value pairs."
-  (map (fn [[k v]] [(string/trim k) (string/triml v)])))
-
-(defn number-lines
-  "Returns a stateful transducer that adds a line number to each line using
-  op as the append function."
-  [op]
+(defn check-line-order
+  "Returns a transducer that ensures that the SDP lines are in the expected
+  order. If the lines are not in the expected the error details are added to
+  the output and, if the :strict flag is passed, the reduction is terminated."
+  [& flags]
   (fn [xf]
-    (let [line-number (volatile! 0)]
+    (let [allowed-lines (volatile! #{:v})
+          {:keys [strict]} (set flags)]
       (fn ([] (xf))
-          ([result] (xf result))
-          ([result input] (xf result (op input (vswap! line-number inc))))))))
+        ([result] (xf result))
+        ([result {:keys [type number section] :as line}]
+         (let [allowed @allowed-lines
+               error (when-not (allowed type) {:type :illegal-line-type
+                                               :expected allowed
+                                               :received type})]
+           (vreset! allowed-lines (get-in structure [section type :allowed-next]))
+           (cond
+            (nil? error) (xf result line)
+            strict (reduced (xf result (assoc line :error error)))
+            :else (xf result (assoc line :error error)))))))))
 
-(def prep-fields (comp split-fields trim-line-types (number-lines conj)))
+(def prep-fields (comp (remove string/blank?)
+                       (map mapify)
+                       add-line-numbers
+                       add-sections
+                       (check-line-order :strict)))
 
-(sequence prep-fields (string/split-lines test-sdp-string))
+(into [] prep-fields (string/split-lines test-sdp-string))
 
 (defn parse
   "Given an SDP string, parses the description into its data structure
