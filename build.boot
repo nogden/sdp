@@ -3,9 +3,7 @@
  :source-paths #{"src"}
  :dependencies '[[org.clojure/clojure "1.7.0"]
                  [org.clojure/tools.logging "0.3.1"]
-                 [dire "0.5.3"]
-                 ;; Dev :dependencies
-                 [clj-logging-config "1.9.12"]])
+                 [dire "0.5.3"]])
 
 (task-options!
  pom
