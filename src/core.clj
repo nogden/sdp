@@ -95,91 +95,94 @@
        :parse-as :integer
        :on-fail [:default-to 0]}
    :o {:name :origin
-       :parse-as
-       {:separator #"\s+"
-        :fields [:username        [:string]
-                 :session-id      [:numeric-string #{}
-                                   :warn "Session id '%v' is not numeric"]
-                 :session-version [:string]
-                 :network-type    [:string #{"IN"}
-                                   :debug "Non-standard network-type '%v'"]
-                 :address-type    [:string #{"IP4" "IP6"}
-                                   :debug "Non-standard address-type '%v'"]
-                 :unicast-address [:string]]}
-       :on-fail :error}
+       :parse-as {:separator #"\s+"
+                  :fields [{:name :username
+                            :parse-as :string}
+                           {:name :session-id
+                            :parse-as :numeric-string}
+                           {:name :session-version
+                            :parse-as :string}
+                           {:name :network-type
+                            :parse-as :string
+                            :expect #{"IN"}}
+                           {:name :address-type
+                            :parse-as :string
+                            :expect #{"IP4" "IP6"}}
+                           {:name :address
+                            :parse-as :unicast-address}]}}
    :s {:name :name
        :parse-as :string
        :on-fail [:default-to " "]}
    :i {:name :information
-       :parse-as :string
-       :on-fail :drop}
+       :parse-as :string}
    :u {:name :uri
-       :parse-as :string
-       :on-fail :drop}
+       :parse-as :string}
    :e {:name :email
-       :parse-as :email
-       :on-fail :drop}
+       :parse-as :email}
    :p {:name :phone
-       :parse-as :phone
-       :on-fail :drop}
+       :parse-as :phone}
    :c {:name :connection
-       :parse-as
-       {:separator #"\s+"
-        :fields [:network-type       [:string #{"IN"}
-                                      :debug "Non-standard network-type '%v'"]
-                 :address-type       [:string #{"IP4" "IP6"}
-                                      :debug "Non-standard address-type '%v'"]
-                 :connection-address [:connection-address  ;; Must pass full field.
-                                      :error "Invalid connection-address '%v'"]]}}
+       :parse-as {:separator #"\s+"
+                  :fields [{:name :network-type
+                            :parse-as :string
+                            :expect #{"IN"}}
+                           {:name :address-type
+                            :parse-as :string
+                            :expect #{"IP4" "IP6"}}
+                           {:name :address
+                            :parse-as :address}]}}
    :b {:name :bandwidth
-       :parse-as
-       {:separator #":"
-        :fields [:bandwidth-type [:string #{"CT" "AS"}
-                                  :debug "Non-standard bandwidth-type '%v'"]
-                 :bandwidth      [:integer
-                                  :error "Bandwidth value '%v' is not an integer"]]}}
+       :parse-as {:separator #":"
+                  :fields [{:name :bandwidth-type
+                            :parse-as :string
+                            :expect #{"CT" "AS"}}
+                           {:name :bandwidth
+                            :parse-as :integer}]}}
    :t {:name :timing
-       :parse-as
-       {:separator #"\s+"
-        :fields [:start-time [:instant
-                              :error "Start time '%v' is not a time"]
-                 :end-time   [:instant
-                              :error "End time '%v' is not a time"]]}}
+       :parse-as {:separator #"\s+"
+                  :fields [{:name :start-time
+                            :parse-as :instant}
+                           {:name :end-time
+                            :parse-as :instant}]}}
    :r {:name :repeat
-       :parse-as
-       {:separator #"\s+"
-        :fields [:repeat-interval [:duration
-                                   :error "Repeat interval '%v' is not a duration"]
-                 :active-duration [:duration
-                                   :error "Active duration '%v' is not a duration"]
-                 :offsets-from-start [:duration
-                                      :error "Invalid offsets list '%v'"
-                                      :collate]]}}
+       :parse-as {:separator #"\s+"
+                  :fields [{:name :repeat-interval
+                            :parse-as :duration}
+                           {:name :active-duration
+                            :parse-as :duration}
+                           {:name :offsets-from-start
+                            :parse-as :duration}]}}
    :z {:name :timezone
-       :parse-as
-       {:separator #" "
-        :fields [:adjustment-time [:instant
-                                   :warn "Adjustment value '%v' is not a time"]
-                 :offset          [:duration
-                                   :warn "Offset value '%v' is not a duration"]]}}
+       :parse-as {:separator #" "
+                  :fields [{:name :adjustment-time
+                            :parse-as :instant}
+                           {:name :offset
+                            :parse-as :duration}]}}
    :k {:name :encryption-keys
-       :parse-as
-       {:separator #":"
-        :fields [:method [:string #{"clear" "base64" "uri" "prompt"}
-                          :debug "Non-standard encryption method '%v'"]
-                 :payload [:string]]}}
+       :parse-as {:separator #":"
+                  :fields [{:name :method
+                            :parse-as :string
+                            :expect #{"clear" "base64" "uri" "prompt"}}
+                           {:name :payload
+                            :parse-as :string}]}}
    :a {:name :attribute
-       :parse-as
-       {:separator #":"
-        :fields [:attribute [:string]
-                 :value [:string]]}}
+       :parse-as {:separator #":"
+                  :fields [{:name :attribute
+                            :parse-as :string}
+                           {:name :value
+                            :parse-as :string}]}}
    :m {:name :media
-       :parse-as
-       {:separator #"\s+"
-        :fields [:media [:string #{"audio" "video" "text" "application" "message"}]
-                 :port [:port]
-                 :protocol [:string #{"udp" "RTP/AVP" "RTP/SAVP"}]
-                 :format [:string]]}}})
+       :parse-as {:separator #"\s+"
+                  :fields [{:name :media
+                            :parse-as :string
+                            :expect #{"audio" "video" "text" "application" "message"}}
+                           {:name :port
+                            :parse-as :port}
+                           {:name :protocol
+                            :parse-as :string
+                            :expect #{"udp" "RTP/AVP" "RTP/SAVP"}}
+                           {:name :format
+                            :parse-as :string}]}}})
 
 (def parse-fns
   "The set of functions used to parse individual SDP field types."
@@ -189,9 +192,11 @@
                                  #(re-matches #"[0-9|A-Z|a-z]*" %))
    :instant #(Integer/parseInt %)
    :duration identity
-   :connection-address identity
-   :email identity
-   :phone identity})
+   :unicast-address identity
+   :address identity
+   :email (fn [x] (throw (Exception. "Invalid email address.")))
+   :phone identity
+   :port identity})
 
 (def error-fns
   "Error handlers for parsing errors."
@@ -202,12 +207,6 @@
                           :parser (:parse-as rule)
                           :exception e}}
                   default-value])
-   :drop (fn [[rule line e]]
-           [{:warn {:type :dropped-field
-                    :field (:name rule)
-                    :value (:value line)
-                    :parser (:parse-as rule)
-                    :exception e}}])
    :error (fn [[rule line e]]
             [{:type :parse-failed
               :field (:name rule)
