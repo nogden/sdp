@@ -92,7 +92,8 @@
 (def parse-rules
   "The rules that determine how each field is parsed."
   {:v {:name :version
-       :parse-as :integer}
+       :parse-as :integer
+       :on-fail [:default-to 0]}
    :o {:name :origin
        :parse-as
        {:separator #"\s+"
@@ -104,17 +105,23 @@
                                    :debug "Non-standard network-type '%v'"]
                  :address-type    [:string #{"IP4" "IP6"}
                                    :debug "Non-standard address-type '%v'"]
-                 :unicast-address [:string]]}}
+                 :unicast-address [:string]]}
+       :on-fail :error}
    :s {:name :name
-       :parse-as :string}
+       :parse-as :string
+       :on-fail [:default-to " "]}
    :i {:name :information
-       :parse-as :string}
+       :parse-as :string
+       :on-fail :drop}
    :u {:name :uri
-       :parse-as :string}
+       :parse-as :string
+       :on-fail :drop}
    :e {:name :email
-       :parse-as :string}
+       :parse-as :email
+       :on-fail :drop}
    :p {:name :phone
-       :parse-as :string}
+       :parse-as :phone
+       :on-fail :drop}
    :c {:name :connection
        :parse-as
        {:separator #"\s+"
@@ -182,7 +189,31 @@
                                  #(re-matches #"[0-9|A-Z|a-z]*" %))
    :instant #(Integer/parseInt %)
    :duration identity
-   :connection-address identity})
+   :connection-address identity
+   :email identity
+   :phone identity})
+
+(def error-fns
+  "Error handlers for parsing errors."
+  {:default-to (fn [[rule line default-value e]]
+                 [{:warn {:type :default-value-substitution
+                          :discarded (:value line)
+                          :substituted default-value
+                          :parser (:parse-as rule)
+                          :exception e}}
+                  default-value])
+   :drop (fn [[rule line e]]
+           [{:warn {:type :dropped-field
+                    :field (:name rule)
+                    :value (:value line)
+                    :parser (:parse-as rule)
+                    :exception e}}])
+   :error (fn [[rule line e]]
+            [{:type :parse-failed
+              :field (:name rule)
+              :value (:value line)
+              :parser (:parse-as rule)
+              :exception e} nil])})
 
 (defn parse-simple-field
   "Parses an atomic field using the specified parse function and returns:
@@ -193,15 +224,18 @@
    parsed-structure]        made to recover from minor errors.
 
   [error-details nil]       If parsing failed."
-  [{parser-key :parse-as} line]
+  [{parser-key :parse-as} line relaxed]
   [:no ((parser-key parse-fns) (:value line))])
 
 (with-handler! #'parse-simple-field
+  "Handle parse errors using the error handlers defined in error-fns."
   Exception
-  (fn [e & [rule line]]
-    [{:type :parse-failed
-      :parser (:parse-as rule)
-      :value (:value line)} e]))
+  (fn [e & [{error-rule :on-fail :as rule} line relaxed]]
+    (cond
+     (nil? relaxed)       ((:error error-fns) [rule line e])
+     (vector? error-rule) (let [[handler value] error-rule]
+                            ((handler error-fns) [rule line value e]))
+     :else                ((:error error-fns) [rule line e]))))
 
 (defn parse-compound-field
   "Parses a compound field described by rule and returns:
@@ -212,7 +246,7 @@
    parsed-structure]        made to recover from minor errors.
 
   [error-details nil]       If parsing failed."
-  [rule line]
+  [rule line relaxed]
   [:no :compound-field-parsing-not-implemented])
 
 (defn mapify-lines
@@ -282,8 +316,8 @@
            (let [{name :name field-type :parse-as :as rule} (type parse-rules)
                  [error field]
                  (cond
-                  (map? field-type)    (parse-compound-field rule line)
-                  (keyword field-type) (parse-simple-field rule line)
+                  (map? field-type)    (parse-compound-field rule line relaxed)
+                  (keyword field-type) (parse-simple-field rule line relaxed)
                   :else                [:existing nil])]
              (cond
               (= :no error)       (xf result (assoc line :parsed {name field}))
