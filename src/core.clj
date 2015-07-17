@@ -153,11 +153,12 @@
                            {:name :offsets-from-start
                             :parse-as :duration}]}}
    :z {:name :timezone
-       :parse-as {:separator #" "
+       :parse-as {:separator #"\s+"
                   :fields [{:name :adjustment-time
                             :parse-as :instant}
                            {:name :offset
-                            :parse-as :duration}]}}
+                            :parse-as :duration}]
+                  :repeats? true}}
    :k {:name :encryption-keys
        :parse-as {:separator #":"
                   :fields [{:name :method
@@ -194,47 +195,54 @@
    :duration identity
    :unicast-address identity
    :address identity
-   :email (fn [x] (throw (Exception. "Invalid email address.")))
+   :email identity
    :phone identity
    :port identity})
 
 (def error-fns
   "Error handlers for parsing errors."
-  {:default-to (fn [[rule line default-value e]]
-                 [{:warn {:type :default-value-substitution
-                          :discarded (:value line)
-                          :substituted default-value
-                          :parser (:parse-as rule)
-                          :exception e}}
-                  default-value])
-   :error (fn [[rule line e]]
-            [{:type :parse-failed
-              :field (:name rule)
-              :value (:value line)
-              :parser (:parse-as rule)
-              :exception e} nil])})
+  {:default-to (fn [[rule value default-value e]]
+                 {:warn {:type :default-value-substitution
+                         :discarded value
+                         :substituted default-value
+                         :parser (:parse-as rule)
+                         :exception e}
+                  :result {(:name rule) default-value}})
+   :error (fn [[rule value e]]
+            {:error {:type :parse-failed
+                     :field (:name rule)
+                     :value value
+                     :parser (:parse-as rule)
+                     :exception e}
+             :result nil})})
 
 (defn parse-simple-field
   "Parses an atomic field using the specified parse function and returns:
 
-  [:no parsed-structure]    If parsing is successful.
+  {:result parsed-structure}  If parsing is successful.
 
-  [{:warn adjustments}      If parsing is successful, but adjustments had to be
-   parsed-structure]        made to recover from minor errors.
+  {:result parsed-structure   If parsing is successful, but adjustments had to
+   :warning adjustments}      be made to recover from minor errors.
 
-  [error-details nil]       If parsing failed."
-  [{parser-key :parse-as} line relaxed]
-  [:no ((parser-key parse-fns) (:value line))])
+  {:error details}            If parsing failed."
+  [{:keys [parse-as name expect]} value relaxed]
+  (let [parsed ((parse-as parse-fns) value)
+        result {:result {name parsed}}]
+    (if (or (nil? expect) (expect parsed))
+      result
+      (assoc result :info {:type :non-standard-value
+                           :expected expect
+                           :received parsed}))))
 
 (with-handler! #'parse-simple-field
   "Handle parse errors using the error handlers defined in error-fns."
   Exception
-  (fn [e & [{error-rule :on-fail :as rule} line relaxed]]
+  (fn [e & [{error-rule :on-fail :as rule} value relaxed]]
     (cond
-     (nil? relaxed)       ((:error error-fns) [rule line e])
-     (vector? error-rule) (let [[handler value] error-rule]
-                            ((handler error-fns) [rule line value e]))
-     :else                ((:error error-fns) [rule line e]))))
+     (nil? relaxed)       ((:error error-fns) [rule value e])
+     (vector? error-rule) (let [[handler param] error-rule]
+                            ((handler error-fns) [rule value param e]))
+     :else                ((:error error-fns) [rule value e]))))
 
 (defn parse-compound-field
   "Parses a compound field described by rule and returns:
@@ -245,8 +253,13 @@
    parsed-structure]        made to recover from minor errors.
 
   [error-details nil]       If parsing failed."
-  [rule line relaxed]
-  [:no :compound-field-parsing-not-implemented])
+  [{spec :parse-as name :name} value relaxed]
+  (let [fields (string/split value (:separator spec))
+        field-rules (if (get-in spec [:fields :repeats?])
+                      (cycle (:fields spec))
+                      (:fields spec))
+        results (map parse-simple-field field-rules fields (repeat relaxed))]
+    [:no {name :not-implemented}]))
 
 (defn mapify-lines
   "Splits an SDP line into a map of its component parts."
@@ -311,21 +324,21 @@
     (let [{:keys [relaxed]} (set flags)]
       (fn ([] (xf))
           ([result] (xf result))
-          ([result {:keys [type] :as line}]
-           (let [{name :name field-type :parse-as :as rule} (type parse-rules)
-                 [error field]
+          ([result {:keys [type value] :as line}]
+           (let [{field-type :parse-as :as rule} (type parse-rules)
+                 {:keys [info warn error skip] parsed :result}
                  (cond
-                  (map? field-type)    (parse-compound-field rule line relaxed)
-                  (keyword field-type) (parse-simple-field rule line relaxed)
-                  :else                [:existing nil])]
+                  (map? field-type)    (parse-compound-field rule value relaxed)
+                  (keyword field-type) (parse-simple-field rule value relaxed)
+                  :else                {:skip true})
+                 line (if info (assoc line :info info) line)]
              (cond
-              (= :no error)       (xf result (assoc line :parsed {name field}))
-              (= :existing error) (xf result line)
-              (contains? error :warn) (xf result (assoc line
-                                                   :parsed {name field}
-                                                   :warning (:warn error)))
-              relaxed  (xf result (assoc line :error error))
-              :else    (reduced (xf result (assoc line :error error))))))))))
+              (and error relaxed) (xf result (assoc line :error error))
+              error      (reduced (xf result (assoc line :error error)))
+              warn       (xf result (assoc line :parsed parsed
+                                                :warning warn))
+              skip       (xf result line)
+              :else      (xf result (assoc line :parsed parsed)))))))))
 
 (defn parse
   "Given an SDP string, parses the description into its data structure
