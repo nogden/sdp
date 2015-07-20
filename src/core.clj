@@ -83,12 +83,6 @@
     :k #{:m :a}
     :a #{:m :a}}})
 
-(defn- throw-if-nil [issue func]
-  (fn [value]
-    (if (nil? (func value))
-      (throw (Exception. issue))
-      value)))
-
 (def parse-rules
   "The rules that determine how each field is parsed."
   {:v {:name :version
@@ -166,15 +160,15 @@
                             :expect #{"clear" "base64" "uri" "prompt"}}
                            {:name :payload
                             :parse-as :string}]}}
-   :a {:name :attribute
+   :a {:name :attributes
        :parse-as {:separator #":"
                   :fields [{:name :attribute
                             :parse-as :string}
                            {:name :value
                             :parse-as :string}]}}
-   :m {:name :media
+   :m {:name :media-descriptions
        :parse-as {:separator #"\s+"
-                  :fields [{:name :media
+                  :fields [{:name :media-type
                             :parse-as :string
                             :expect #{"audio" "video" "text" "application" "message"}}
                            {:name :port
@@ -184,6 +178,12 @@
                             :expect #{"udp" "RTP/AVP" "RTP/SAVP"}}
                            {:name :format
                             :parse-as :string}]}}})
+
+(defn- throw-if-nil [issue func]
+  (fn [value]
+    (if (nil? (func value))
+      (throw (Exception. issue))
+      value)))
 
 (def parse-fns
   "The set of functions used to parse individual SDP field types."
@@ -271,10 +271,11 @@
         field-rules (if (get-in spec [:fields :repeats?])
                       (cycle (:fields spec))
                       (:fields spec))
-        results (map parse-simple-field field-rules fields (repeat relaxed))]
-    (apply merge-with into (eduction
-                            (vectorise-values-of #{:error :warn :info})
-                            results))))
+        parsed (map parse-simple-field field-rules fields (repeat relaxed))
+        collated (apply merge-with into
+                        (eduction (vectorise-values-of #{:error :warn :info})
+                                  parsed))]
+    (assoc collated :result {name (:result collated)})))
 
 (defn mapify-lines
   "Splits an SDP line into a map of its component parts."
@@ -294,12 +295,14 @@
 (defn add-sections
   "A stateful transducer that adds the a section identifier to each line."
   [xf]
-  (let [section (volatile! :session)]
+  (let [section (volatile! {:name :session
+                            :number 0})]
     (fn ([] (xf))
         ([result] (xf result))
         ([result {line-type :type :as input}]
          (when (= :m line-type)
-           (vreset! section :media))
+           (vreset! section {:name :media
+                             :number (inc (:number @section))}))
          (xf result (assoc input :section @section))))))
 
 (defn check-line-order
@@ -320,7 +323,7 @@
                error (when-not (allowed type) {:type :illegal-line-type
                                                :expected allowed
                                                :received type})
-               possibilities (get-in structure [section type])]
+               possibilities (get-in structure [(:name section) type])]
            (when possibilities
              (vreset! allowed-lines possibilities))
            (cond
@@ -354,6 +357,12 @@
                                                 :warning warn))
               skip       (xf result line)
               :else      (xf result (assoc line :parsed parsed)))))))))
+
+(defn collate
+  "A transducer that, given a map representation of a parsed SDP line, will
+  collate the parsed values into a single map."
+  [xf]
+  p)
 
 (defn parse
   "Given an SDP string, parses the description into its data structure
