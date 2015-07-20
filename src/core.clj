@@ -188,10 +188,10 @@
 (def parse-fns
   "The set of functions used to parse individual SDP field types."
   {:string identity
-   :integer #(Integer/parseInt %)
+   :integer #(Integer. %)
    :numeric-string (throw-if-nil "String '%v' is not alphanumeric"
                                  #(re-matches #"[0-9|A-Z|a-z]*" %))
-   :instant #(Integer/parseInt %)
+   :instant bigint
    :duration identity
    :unicast-address identity
    :address identity
@@ -244,22 +244,37 @@
                             ((handler error-fns) [rule value param e]))
      :else                ((:error error-fns) [rule value e]))))
 
+(defn vectorise-values-of
+  "Returns a transducer that will transform the values of ks into vectors."
+  [ks]
+  (fn [xf]
+    (fn ([] (xf))
+        ([result] (xf result))
+        ([result input]
+         (xf result (reduce (fn [r [k v]]
+                              (if (ks k)
+                                (update-in r [k] (fnil conj []) v)
+                                (assoc r k v)))
+                            {} input))))))
+
 (defn parse-compound-field
   "Parses a compound field described by rule and returns:
 
-  [:no parsed-structure]    If parsing is successful.
+  {:result parsed-structure}  If parsing is successful.
 
-  [{:warn adjustments}      If parsing is successful, but adjustments had to be
-   parsed-structure]        made to recover from minor errors.
+  {:result parsed-structure   If parsing is successful, but adjustments had to
+   :warning adjustments}      be made to recover from minor errors.
 
-  [error-details nil]       If parsing failed."
+  {:error details}            If parsing failed."
   [{spec :parse-as name :name} value relaxed]
   (let [fields (string/split value (:separator spec))
         field-rules (if (get-in spec [:fields :repeats?])
                       (cycle (:fields spec))
                       (:fields spec))
         results (map parse-simple-field field-rules fields (repeat relaxed))]
-    [:no {name :not-implemented}]))
+    (apply merge-with into (eduction
+                            (vectorise-values-of #{:error :warn :info})
+                            results))))
 
 (defn mapify-lines
   "Splits an SDP line into a map of its component parts."
