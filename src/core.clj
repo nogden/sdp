@@ -168,9 +168,11 @@
    :u {:name :uri
        :parse-as :string}
    :e {:name :email
-       :parse-as :email}
+       :parse-as :email
+       :insert :vector}
    :p {:name :phone
-       :parse-as :phone}
+       :parse-as :phone
+       :insert :vector}
    :c {:name :connection
        :parse-as {:separator #"\s+"
                   :fields [{:name :network-type
@@ -386,7 +388,6 @@
         (cond
          (= :vector insert) (update-in result [name] (fnil conj []) (name parsed))
          (fn? insert)       (insert result (name parsed))
-
          :else              (conj result parsed))))))
 
 (defn parse
