@@ -47,15 +47,73 @@
    i=A Seminar on the session description protocol
    u=http://www.example.com/seminars/sdp.pdf
    e=j.doe@example.com (Jane Doe)
+   p=+44 (0)1226 241814
    c=IN IP4 224.2.17.12/127
+   b=CT:128
    t=2873397496 2873404696
    r=7d 1h 0 25h
    t=2879947328 2884457638
    t=2947393048 2958437394
+   z=2882844526 -1h 2898848070 0
+   k=clear:gf638ebi3rh3i3o3e35767
    a=recvonly
    m=audio 49170 RTP/AVP 0
-   m=video 51372 RTP/AVP 99
+   i=Media title
+   c=IN IP4 224.2.17.14/127
+   b=AT:14
+   a=recvonly
+   a=ctlmethod:serverpush
+   m=video 51372 RTP/AVP 992882844526
    a=rtpmap:99 h263-1998/90000")
+
+(def target {:version 0
+             :origin {:username "jdoe"
+                      :session-id "2890844526"
+                      :session-version 2890842807
+                      :network-type "IN"
+                      :address-type "IP4"
+                      :address "10.47.16.5"}
+             :session-name "SDP Seminar"
+             :information "A Seminar on the session description protocol"
+             :uri "http://www.example.com/seminars/sdp.pdf"
+             :email ["j.doe@example.com (Jane Doe)"]
+             :phone "+44 (0)1226 241814"
+             :connection {:network-type "IN"
+                          :address-type "IP4"
+                          :address "224.2.17.12"
+                          :ttl 127}
+             :bandwidth [{:type "CT"
+                          :value 128}]
+             :timing [{:start 2873397496N
+                       :stop 2873404696N
+                       :repeat [{:repeat-interval "7d"
+                                 :active-duration "1h"
+                                 :offsets-from-start ["0" "25h"]}]}]
+             :timezone [{:adjustment-time 2882844526N
+                         :offset "-1h"}]
+             :encryption-key {:method "clear"
+                              :payload "gf638ebi3rh3i3o3e35767"}
+             :attributes [{:attribute "recvonly"}]
+             :media-descriptions [{:media-type "audio"
+                                   :port 49170
+                                   :protocol "RTP/AVP"
+                                   :format "0"
+                                   :information "Media title"
+                                   :connection {:network-type "IN"
+                                                :address-type "IP4"
+                                                :address "224.2.17.14"
+                                                :ttl 127}
+                                   :bandwidth [{:type "AT"
+                                                :value 14}]
+                                   :attributes [{:attribute "recvonly"}
+                                                {:attribute "ctlmethod"
+                                                 :value "serverpush"}]}
+                                  {:media-type "video"
+                                   :port 51372
+                                   :protocol "RTP/AVP"
+                                   :format "992882844526"
+                                   :attributes [{:attribute "rtpmap"
+                                                 :value "99 h263-1998/90000"}]}]})
 
 (def structure
   {:session
@@ -129,13 +187,15 @@
                             :parse-as :string
                             :expect #{"CT" "AS"}}
                            {:name :bandwidth
-                            :parse-as :integer}]}}
+                            :parse-as :integer}]}
+       :insert :vector}
    :t {:name :timing
        :parse-as {:separator #"\s+"
                   :fields [{:name :start-time
                             :parse-as :instant}
                            {:name :end-time
-                            :parse-as :instant}]}}
+                            :parse-as :instant}]}
+       :insert :vector}
    :r {:name :repeat
        :parse-as {:separator #"\s+"
                   :fields [{:name :repeat-interval
@@ -143,7 +203,11 @@
                            {:name :active-duration
                             :parse-as :duration}
                            {:name :offsets-from-start
-                            :parse-as :duration}]}}
+                            :parse-as :duration}]}
+       :insert (fn [acc parsed]
+                 (let [index (dec (count (:timing acc)))]
+                   (update-in acc [:timing index :repeat]
+                              (fnil conj []) parsed)))}
    :z {:name :timezone
        :parse-as {:separator #"\s+"
                   :fields [{:name :adjustment-time
@@ -151,7 +215,7 @@
                            {:name :offset
                             :parse-as :duration}]
                   :repeats? true}}
-   :k {:name :encryption-keys
+   :k {:name :encryption-key
        :parse-as {:separator #":"
                   :fields [{:name :method
                             :parse-as :string
@@ -163,7 +227,8 @@
                   :fields [{:name :attribute
                             :parse-as :string}
                            {:name :value
-                            :parse-as :string}]}}
+                            :parse-as :string}]}
+       :insert :vector}
    :m {:name :media-descriptions
        :parse-as {:separator #"\s+"
                   :fields [{:name :media-type
@@ -175,7 +240,8 @@
                             :parse-as :string
                             :expect #{"udp" "RTP/AVP" "RTP/SAVP"}}
                            {:name :format
-                            :parse-as :string}]}}})
+                            :parse-as :string}]}
+       :insert :vector}})
 
 (defn- throw-if-nil [issue func]
   (fn [value]
@@ -232,19 +298,6 @@
      (vector? error-rule) (let [[handler param] error-rule]
                             ((handler error-fns) [rule value param line-num e]))
      :else                ((:error error-fns) [rule value line-num e]))))
-
-(defn vectorise-values-of
-  "Returns a transducer that will transform the values of ks into vectors."
-  [ks]
-  (fn [xf]
-    (fn ([] (xf))
-        ([result] (xf result))
-        ([result input]
-         (xf result (reduce (fn [r [k v]]
-                              (if (ks k)
-                                (update-in r [k] (fnil conj []) v)
-                                (assoc r k v)))
-                            {} input))))))
 
 (defn parse-compound-field
   "Parses a compound field described by rule and returns the parsed value."
@@ -315,31 +368,26 @@
                                :line-number line-number})))))))))
 
 (defn parse-lines
-  "Returns a transducer that, given a map representation of an SDP line, will
-  parse the line value and return its data structure equiverlent. Any errors in
-  parsing will result in an ExceptionInfo being thrown. The following
+  "Returns a reducing function that, given a map representation of an SDP line,
+  will parse the line value and return its data structure equiverlent. Any
+  errors in parsing will result in an ExceptionInfo being thrown. The following
   flags are supported:
 
   :relaxed        Causes minor errors to be automatically corrected where
                   possible, corrections are logged at the info log level. Major
                   errros will still throw an ExceptionInfo."
   [& flags]
-  (fn [xf]
-    (let [{:keys [relaxed]} (set flags)]
-      (fn ([] (xf))
-          ([result] (xf result))
-          ([result {:keys [type value line-number] :as line}]
-           (let [{field-type :parse-as :as rule} (type parse-rules)
-                 parsed (if (map? field-type)
-                          (parse-compound-field rule value line-number relaxed)
-                          (parse-simple-field rule value line-number relaxed))]
-             (xf result (assoc line :parsed parsed))))))))
+  (let [{:keys [relaxed]} (set flags)]
+    (fn [result {:keys [type value line-number section] :as line}]
+      (let [{:keys [insert parse-as name] :as rule} (type parse-rules)
+            parsed (if (map? parse-as)
+                     (parse-compound-field rule value line-number relaxed)
+                     (parse-simple-field rule value line-number relaxed))]
+        (cond
+         (= :vector insert) (update-in result [name] (fnil conj []) (name parsed))
+         (fn? insert)       (insert result (name parsed))
 
-(defn collate
-  "Collates a series of parsed SDP lines into a single structure."
-  [lines]
-  (let [sectioned (group-by #(get-in % [:section :number]) lines)]
-    (apply merge-with into (map :parsed (sectioned 0)))))
+         :else              (conj result parsed))))))
 
 (defn parse
   "Given an SDP string, parses the description into its data structure
@@ -350,19 +398,14 @@
                   required."
   [sdp-string & flags]
   (let [{:keys [relaxed]} (set flags)
-        parse-sdp (comp (remove string/blank?)
-                        (map mapify-lines)
-                        add-line-numbers
-                        add-sections
-                        (check-line-order relaxed)
-                        (parse-lines relaxed)
-;;                         (map #(map :parsed %))
-                        (vectorise-values-of #{:email :phone :bandwidth
-                                               :timing :repeat :attributes})
-                        )]
+        prep-lines (comp (remove string/blank?)
+                         (map mapify-lines)
+                         add-line-numbers
+                         add-sections
+                         (check-line-order relaxed))]
     (->> sdp-string
          string/split-lines
-         (into [] parse-sdp))))
+         (transduce prep-lines (completing (parse-lines relaxed)) {}))))
 
 (parse test-sdp-string)
 
