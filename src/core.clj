@@ -57,8 +57,6 @@
    m=video 51372 RTP/AVP 99
    a=rtpmap:99 h263-1998/90000")
 
-(parse test-sdp-string)
-
 (def structure
   {:session
    {:v #{:o}
@@ -277,36 +275,44 @@
 (defn add-sections
   "A stateful transducer that adds the a section identifier to each line."
   [xf]
-  (let [section (volatile! {:name :session
-                            :number 0})]
+  (let [section (volatile! :session)]
     (fn ([] (xf))
         ([result] (xf result))
         ([result {line-type :type :as input}]
          (when (= :m line-type)
-           (vreset! section {:name :media
-                             :number (inc (:number @section))}))
+           (vreset! section :media))
          (xf result (assoc input :section @section))))))
 
 (defn check-line-order
-  "A transducer that ensures that the SDP lines are in the expected order. If
-  the lines are not in the expected the error details are added to the output
-  and the reduction is terminated."
-  [xf]
-  (let [allowed-lines (volatile! #{:v})]
-    (fn ([] (xf))
+  "Returns a transducer that ensures that the SDP lines are in the expected
+  order. If the lines are not in the expected the error details are added to
+  the output and the reduction is terminated. The following flags are supported:
+
+  :relaxed        Causes bad ordering to be treated as a non-fatal error that
+                  only generates a log message."
+  [& flags]
+  (fn [xf]
+    (let [{:keys [relaxed]} (set flags)
+          allowed-lines (volatile! #{:v})]
+      (fn ([] (xf))
         ([result] (xf result))
         ([result {:keys [type line-number section] :as line}]
          (let [allowed @allowed-lines
-               possibilities (get-in structure [(:name section) type])]
-           (if (allowed type)
-             (do (vreset! allowed-lines possibilities)
-                 (xf result line))
-             (throw (ex-info (str "Illegal line type '" type "' on line "
-                                  line-number ", expected one of " allowed)
-                             {:error-type :illegal-line-type
-                              :expected allowed
-                              :received type
-                              :line-number line-number}))))))))
+               possibilities (get-in structure [section type])]
+           (when possibilities
+             (vreset! allowed-lines possibilities))
+           (cond
+            (allowed type) (xf result line)
+            relaxed (do (log/warn "Skipping illegal line type '" type
+                                  "' on line " line-number ", expected one of "
+                                  allowed) result)
+            :else   (throw
+                     (ex-info (str "Illegal line type '" type "' on line "
+                                   line-number ", expected one of " allowed)
+                              {:error-type :illegal-line-type
+                               :expected allowed
+                               :received type
+                               :line-number line-number})))))))))
 
 (defn parse-lines
   "Returns a transducer that, given a map representation of an SDP line, will
@@ -348,11 +354,17 @@
                         (map mapify-lines)
                         add-line-numbers
                         add-sections
-                        check-line-order
-                        (parse-lines relaxed))]
+                        (check-line-order relaxed)
+                        (parse-lines relaxed)
+;;                         (map #(map :parsed %))
+                        (vectorise-values-of #{:email :phone :bandwidth
+                                               :timing :repeat :attributes})
+                        )]
     (->> sdp-string
          string/split-lines
          (into [] parse-sdp))))
+
+(parse test-sdp-string)
 
 (defn emit
   "Emits the SDP description string for the provided media session
