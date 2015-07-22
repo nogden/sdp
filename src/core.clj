@@ -201,48 +201,39 @@
 
 (def error-fns
   "Error handlers for parsing errors."
-  {:default-to (fn [[rule value default-value e]]
-                 {:warn {:type :default-value-substitution
-                         :discarded value
-                         :substituted default-value
-                         :parser (:parse-as rule)
-                         :exception e}
-                  :result {(:name rule) default-value}})
-   :error (fn [[rule value e]]
-            {:error {:type :parse-failed
+  {:default-to (fn [[rule value default line-num e]]
+                 (log/info "Bad value '" value "' for " (name (:name rule))
+                           " on line " line-num
+                           ", substituting default value '" default "'")
+                 {(:name rule) default})
+   :error (fn [[rule value line-num e]]
+            (throw (ex-info (str "Bad value '" value "' for "
+                                 (name (:name rule)) " on line " line-num)
+                    {:error-type :parse-failed
                      :field (:name rule)
                      :value value
-                     :parser (:parse-as rule)
-                     :exception e}
-             :result nil})})
+                     :parser (:parse-as rule)} e)))})
 
 (defn parse-simple-field
-  "Parses an atomic field using the specified parse function and returns:
-
-  {:result parsed-structure}  If parsing is successful.
-
-  {:result parsed-structure   If parsing is successful, but adjustments had to
-   :warning adjustments}      be made to recover from minor errors.
-
-  {:error details}            If parsing failed."
-  [{:keys [parse-as name expect]} value relaxed]
+  "Parses an atomic field using the specified parse function and returns the
+  parsed value."
+  [{:keys [parse-as name expect]} value line-num relaxed]
   (let [parsed ((parse-as parse-fns) value)
-        result {:result {name parsed}}]
-    (if (or (nil? expect) (expect parsed))
-      result
-      (assoc result :info {:type :non-standard-value
-                           :expected expect
-                           :received parsed}))))
+        result {name parsed}]
+    (when-not (or (nil? expect) (expect parsed))
+        (log/debug "Non-standard value '" parsed "' for '" name "' on line "
+                   line-num ", expected one of " expect))
+    result))
 
 (with-handler! #'parse-simple-field
   "Handle parse errors using the error handlers defined in error-fns."
   Exception
-  (fn [e & [{error-rule :on-fail :as rule} value relaxed]]
+  (fn [e & [{error-rule :on-fail :as rule} value line-num relaxed]]
     (cond
-     (nil? relaxed)       ((:error error-fns) [rule value e])
+     (nil? relaxed)       ((:error error-fns) [rule value line-num e])
      (vector? error-rule) (let [[handler param] error-rule]
-                            ((handler error-fns) [rule value param e]))
-     :else                ((:error error-fns) [rule value e]))))
+                            ((handler error-fns) [rule value param line-num e]))
+     :else                ((:error error-fns) [rule value line-num e]))))
 
 (defn vectorise-values-of
   "Returns a transducer that will transform the values of ks into vectors."
@@ -258,24 +249,15 @@
                             {} input))))))
 
 (defn parse-compound-field
-  "Parses a compound field described by rule and returns:
-
-  {:result parsed-structure}  If parsing is successful.
-
-  {:result parsed-structure   If parsing is successful, but adjustments had to
-   :warning adjustments}      be made to recover from minor errors.
-
-  {:error details}            If parsing failed."
-  [{spec :parse-as name :name} value relaxed]
+  "Parses a compound field described by rule and returns the parsed value."
+  [{spec :parse-as name :name} value line-num relaxed]
   (let [fields (string/split value (:separator spec))
         field-rules (if (get-in spec [:fields :repeats?])
                       (cycle (:fields spec))
                       (:fields spec))
-        parsed (map parse-simple-field field-rules fields (repeat relaxed))
-        collated (apply merge-with into
-                        (eduction (vectorise-values-of #{:error :warn :info})
-                                  parsed))]
-    (assoc collated :result {name (:result collated)})))
+        parsed (map parse-simple-field field-rules fields
+                    (repeat line-num) (repeat relaxed))]
+    {name (apply merge parsed)}))
 
 (defn mapify-lines
   "Splits an SDP line into a map of its component parts."
@@ -306,63 +288,52 @@
          (xf result (assoc input :section @section))))))
 
 (defn check-line-order
-  "Returns a transducer that ensures that the SDP lines are in the expected
-  order. If the lines are not in the expected the error details are added to
-  the output and the reduction is terminated. The following flags are supported:
-
-  :relaxed        Causes the reduction to continue despite errors. Error
-                  information is still added to the output."
-  [& flags]
-  (fn [xf]
-    (let [allowed-lines (volatile! #{:v})
-          {:keys [relaxed]} (set flags)]
-      (fn ([] (xf))
+  "A transducer that ensures that the SDP lines are in the expected order. If
+  the lines are not in the expected the error details are added to the output
+  and the reduction is terminated."
+  [xf]
+  (let [allowed-lines (volatile! #{:v})]
+    (fn ([] (xf))
         ([result] (xf result))
-        ([result {:keys [type number section] :as line}]
+        ([result {:keys [type line-number section] :as line}]
          (let [allowed @allowed-lines
-               error (when-not (allowed type) {:type :illegal-line-type
-                                               :expected allowed
-                                               :received type})
                possibilities (get-in structure [(:name section) type])]
-           (when possibilities
-             (vreset! allowed-lines possibilities))
-           (cond
-            (nil? error) (xf result line)
-            relaxed      (xf result (assoc line :error error))
-            :else        (reduced (xf result (assoc line :error error))))))))))
+           (if (allowed type)
+             (do (vreset! allowed-lines possibilities)
+                 (xf result line))
+             (throw (ex-info (str "Illegal line type '" type "' on line "
+                                  line-number ", expected one of " allowed)
+                             {:error-type :illegal-line-type
+                              :expected allowed
+                              :received type
+                              :line-number line-number}))))))))
 
 (defn parse-lines
   "Returns a transducer that, given a map representation of an SDP line, will
-  parse the line value and return its data structure equiverlent. The following
+  parse the line value and return its data structure equiverlent. Any errors in
+  parsing will result in an ExceptionInfo being thrown. The following
   flags are supported:
 
-  :relaxed        TODO"
+  :relaxed        Causes minor errors to be automatically corrected where
+                  possible, corrections are logged at the info log level. Major
+                  errros will still throw an ExceptionInfo."
   [& flags]
   (fn [xf]
     (let [{:keys [relaxed]} (set flags)]
       (fn ([] (xf))
           ([result] (xf result))
-          ([result {:keys [type value] :as line}]
+          ([result {:keys [type value line-number] :as line}]
            (let [{field-type :parse-as :as rule} (type parse-rules)
-                 {:keys [info warn error skip] parsed :result}
-                 (cond
-                  (map? field-type)    (parse-compound-field rule value relaxed)
-                  (keyword field-type) (parse-simple-field rule value relaxed)
-                  :else                {:skip true})
-                 line (if info (assoc line :info info) line)]
-             (cond
-              (and error relaxed) (xf result (assoc line :error error))
-              error      (reduced (xf result (assoc line :error error)))
-              warn       (xf result (assoc line :parsed parsed
-                                                :warning warn))
-              skip       (xf result line)
-              :else      (xf result (assoc line :parsed parsed)))))))))
+                 parsed (if (map? field-type)
+                          (parse-compound-field rule value line-number relaxed)
+                          (parse-simple-field rule value line-number relaxed))]
+             (xf result (assoc line :parsed parsed))))))))
 
 (defn collate
-  "A transducer that, given a map representation of a parsed SDP line, will
-  collate the parsed values into a single map."
-  [xf]
-  p)
+  "Collates a series of parsed SDP lines into a single structure."
+  [lines]
+  (let [sectioned (group-by #(get-in % [:section :number]) lines)]
+    (apply merge-with into (map :parsed (sectioned 0)))))
 
 (defn parse
   "Given an SDP string, parses the description into its data structure
@@ -373,13 +344,15 @@
                   required."
   [sdp-string & flags]
   (let [{:keys [relaxed]} (set flags)
-        parser (comp (remove string/blank?)
-                     (map mapify-lines)
-                     add-line-numbers
-                     add-sections
-                     (check-line-order relaxed)
-                     (parse-lines relaxed))]
-    (into [] parser (string/split-lines sdp-string))))
+        parse-sdp (comp (remove string/blank?)
+                        (map mapify-lines)
+                        add-line-numbers
+                        add-sections
+                        check-line-order
+                        (parse-lines relaxed))]
+    (->> sdp-string
+         string/split-lines
+         (into [] parse-sdp))))
 
 (defn emit
   "Emits the SDP description string for the provided media session
