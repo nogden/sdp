@@ -32,16 +32,8 @@
 ;; format string, and is case-significant unless a specific field defines
 ;; otherwise.  Whitespace MUST NOT be used on either side of the "=" sign.
 
-;; An SDP session description consists of a session-level section followed by
-;; zero or more media-level sections.  The session-level part starts with a
-;; "v=" line and continues to the first media-level section.  Each media-level
-;; section starts with an "m=" line and continues to the next media-level
-;; section or end of the whole session description.  In general, session-level
-;; values are the default for all media unless overridden by an equivalent
-;; media-level value.
-
 (def test-sdp-string
-  "v=0
+  "v=j
    o=jdoe 2890844526 2890842807 IN IP4 10.47.16.5
    s=SDP Seminar
    i=A Seminar on the session description protocol
@@ -66,54 +58,17 @@
    m=video 51372 RTP/AVP 992882844526
    a=rtpmap:99 h263-1998/90000")
 
-(def target {:version 0
-             :origin {:username "jdoe"
-                      :session-id "2890844526"
-                      :session-version 2890842807
-                      :network-type "IN"
-                      :address-type "IP4"
-                      :address "10.47.16.5"}
-             :session-name "SDP Seminar"
-             :information "A Seminar on the session description protocol"
-             :uri "http://www.example.com/seminars/sdp.pdf"
-             :email ["j.doe@example.com (Jane Doe)"]
-             :phone "+44 (0)1226 241814"
-             :connection {:network-type "IN"
-                          :address-type "IP4"
-                          :address "224.2.17.12"
-                          :ttl 127}
-             :bandwidth [{:type "CT"
-                          :value 128}]
-             :timing [{:start 2873397496N
-                       :stop 2873404696N
-                       :repeat [{:repeat-interval "7d"
-                                 :active-duration "1h"
-                                 :offsets-from-start ["0" "25h"]}]}]
-             :timezone [{:adjustment-time 2882844526N
-                         :offset "-1h"}]
-             :encryption-key {:method "clear"
-                              :payload "gf638ebi3rh3i3o3e35767"}
-             :attributes [{:attribute "recvonly"}]
-             :media-descriptions [{:media-type "audio"
-                                   :port 49170
-                                   :protocol "RTP/AVP"
-                                   :format "0"
-                                   :information "Media title"
-                                   :connection {:network-type "IN"
-                                                :address-type "IP4"
-                                                :address "224.2.17.14"
-                                                :ttl 127}
-                                   :bandwidth [{:type "AT"
-                                                :value 14}]
-                                   :attributes [{:attribute "recvonly"}
-                                                {:attribute "ctlmethod"
-                                                 :value "serverpush"}]}
-                                  {:media-type "video"
-                                   :port 51372
-                                   :protocol "RTP/AVP"
-                                   :format "992882844526"
-                                   :attributes [{:attribute "rtpmap"
-                                                 :value "99 h263-1998/90000"}]}]})
+;; An SDP session description consists of a session-level section followed by
+;; zero or more media-level sections.  The session-level part starts with a
+;; "v=" line and continues to the first media-level section.  Each media-level
+;; section starts with an "m=" line and continues to the next media-level
+;; section or end of the whole session description.  In general, session-level
+;; values are the default for all media unless overridden by an equivalent
+;; media-level value.
+
+;; Some lines in each description are REQUIRED and some are OPTIONAL, but all
+;; MUST appear in exactly the order given here (the fixed order greatly
+;; enhances error detection and allows for a simple parser).
 
 (def structure
   {:session
@@ -138,6 +93,26 @@
     :b #{:m :k :a}
     :k #{:m :a}
     :a #{:m :a}}})
+
+(defn vectorize
+  "Collate duplicate elements of this type into a vector under the same key."
+  [final key element]
+  (update-in final [key] (fnil conj []) (key element)))
+
+(defn in-last
+  "Inserts an element of this type under the most recent entry for parent."
+  [parent]
+  (fn [final key element]
+    (let [index (dec (count (parent final)))]
+      (assoc-in final [parent index key] (key element)))))
+
+(defn vectorize-in-last
+  "Insert elements of this type into a vector under the most recent entry for
+  parent."
+  [parent]
+  (fn [final key element]
+    (let [index (dec (count (parent final)))]
+      (update-in final [parent index key] (fnil conj []) (key element)))))
 
 (def parse-rules
   "The rules that determine how each field is parsed."
@@ -164,15 +139,16 @@
        :parse-as :string
        :on-fail [:default-to " "]}
    :i {:name :information
-       :parse-as :string}
+       :parse-as :string
+       :insert {:media (in-last :media-descriptions)}}
    :u {:name :uri
        :parse-as :string}
    :e {:name :email
        :parse-as :email
-       :insert :vector}
+       :insert vectorize}
    :p {:name :phone
        :parse-as :phone
-       :insert :vector}
+       :insert vectorize}
    :c {:name :connection
        :parse-as {:separator #"\s+"
                   :fields [{:name :network-type
@@ -182,7 +158,8 @@
                             :parse-as :string
                             :expect #{"IP4" "IP6"}}
                            {:name :address
-                            :parse-as :address}]}}
+                            :parse-as :address}]}
+       :insert {:media (in-last :media-descriptions)}}
    :b {:name :bandwidth
        :parse-as {:separator #":"
                   :fields [{:name :bandwidth-type
@@ -190,14 +167,15 @@
                             :expect #{"CT" "AS"}}
                            {:name :bandwidth
                             :parse-as :integer}]}
-       :insert :vector}
+       :insert {:session vectorize
+                :media (vectorize-in-last :media-descriptions)}}
    :t {:name :timing
        :parse-as {:separator #"\s+"
                   :fields [{:name :start-time
                             :parse-as :instant}
                            {:name :end-time
                             :parse-as :instant}]}
-       :insert :vector}
+       :insert vectorize}
    :r {:name :repeat
        :parse-as {:separator #"\s+"
                   :fields [{:name :repeat-interval
@@ -206,10 +184,7 @@
                             :parse-as :duration}
                            {:name :offsets-from-start
                             :parse-as :duration}]}
-       :insert (fn [acc parsed]
-                 (let [index (dec (count (:timing acc)))]
-                   (update-in acc [:timing index :repeat]
-                              (fnil conj []) parsed)))}
+       :insert (vectorize-in-last :timing)}
    :z {:name :timezone
        :parse-as {:separator #"\s+"
                   :fields [{:name :adjustment-time
@@ -223,19 +198,22 @@
                             :parse-as :string
                             :expect #{"clear" "base64" "uri" "prompt"}}
                            {:name :payload
-                            :parse-as :string}]}}
+                            :parse-as :string}]}
+       :insert {:media (in-last :media-descriptions)}}
    :a {:name :attributes
        :parse-as {:separator #":"
                   :fields [{:name :attribute
                             :parse-as :string}
                            {:name :value
                             :parse-as :string}]}
-       :insert :vector}
+       :insert {:session vectorize
+                :media (vectorize-in-last :media-descriptions)}}
    :m {:name :media-descriptions
        :parse-as {:separator #"\s+"
                   :fields [{:name :media-type
                             :parse-as :string
-                            :expect #{"audio" "video" "text" "application" "message"}}
+                            :expect #{"audio" "video" "text"
+                                      "application" "message"}}
                            {:name :port
                             :parse-as :port}
                            {:name :protocol
@@ -243,7 +221,7 @@
                             :expect #{"udp" "RTP/AVP" "RTP/SAVP"}}
                            {:name :format
                             :parse-as :string}]}
-       :insert :vector}})
+       :insert vectorize}})
 
 (defn- throw-if-nil [issue func]
   (fn [value]
@@ -297,8 +275,8 @@
   (fn [e & [{error-rule :on-fail :as rule} value line-num relaxed]]
     (cond
      (nil? relaxed)       ((:error error-fns) [rule value line-num e])
-     (vector? error-rule) (let [[handler param] error-rule]
-                            ((handler error-fns) [rule value param line-num e]))
+     (vector? error-rule) (let [[func param] error-rule]
+                            ((func error-fns) [rule value param line-num e]))
      :else                ((:error error-fns) [rule value line-num e]))))
 
 (defn parse-compound-field
@@ -341,7 +319,8 @@
 (defn check-line-order
   "Returns a transducer that ensures that the SDP lines are in the expected
   order. If the lines are not in the expected the error details are added to
-  the output and the reduction is terminated. The following flags are supported:
+  the output and the reduction is terminated. The following flags are
+  supported:
 
   :relaxed        Causes bad ordering to be treated as a non-fatal error that
                   only generates a log message."
@@ -377,18 +356,19 @@
 
   :relaxed        Causes minor errors to be automatically corrected where
                   possible, corrections are logged at the info log level. Major
-                  errros will still throw an ExceptionInfo."
+                  errors will still throw an ExceptionInfo."
   [& flags]
   (let [{:keys [relaxed]} (set flags)]
     (fn [result {:keys [type value line-number section] :as line}]
       (let [{:keys [insert parse-as name] :as rule} (type parse-rules)
             parsed (if (map? parse-as)
                      (parse-compound-field rule value line-number relaxed)
-                     (parse-simple-field rule value line-number relaxed))]
-        (cond
-         (= :vector insert) (update-in result [name] (fnil conj []) (name parsed))
-         (fn? insert)       (insert result (name parsed))
-         :else              (conj result parsed))))))
+                     (parse-simple-field rule value line-number relaxed))
+            insert (if (map? insert) (section insert) insert)
+            insert (if (fn? insert)
+                        insert
+                       (fn [final key parsed] (conj final parsed)))]
+        (insert result name parsed)))))
 
 (defn parse
   "Given an SDP string, parses the description into its data structure
