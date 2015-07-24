@@ -1,76 +1,14 @@
-;; A parser and emitter for the Session Description Protocol (SDP) as described
-;; in RFC 4566.
-
-;; SDP is intended for describing multimedia sessions for the purposes of
-;; session announcement, session invitation and other forms of multimedia
-;; session initiation.
-(ns sdp.core
-  "Namespace providing the published interface of the SDP library."
+(ns multimedia.streaming.sdp.parser
+  "The multimedia.streaming.sdp.parser namespace is an internal namespace
+  providing the utility functions used within the parser. It is __not__ part of
+  the published interface and may change without warning between versions."
   (:require [clojure.string :as string]
             [clojure.tools.logging :as log]
             [dire.core :refer [with-handler!]]))
 
-(def mime-type
-  "The mime-type string to be used for SDP data."
-  "application/sdp")
-
-;; An SDP session description is entirely textual using the ISO 10646 character
-;; set in UTF-8 encoding.  SDP field names and attribute names use only the
-;; US-ASCII subset of UTF-8, but textual fields and attribute values MAY use
-;; the full ISO 10646 character set. Field and attribute values that use the
-;; full UTF-8 character set are never directly compared, hence there is no
-;; requirement for UTF-8 normalisation.
-
-;; An SDP session description consists of a number of lines of text of the
-;; form:q
-;;
-;;    <type>=<value>
-;;
-;; where <type> MUST be exactly one case-significant character and <value> is
-;; structured text whose format depends on <type>.  In general, <value> is
-;; either a number of fields delimited by a single space character or a free
-;; format string, and is case-significant unless a specific field defines
-;; otherwise.  Whitespace MUST NOT be used on either side of the "=" sign.
-
-(def test-sdp-string
-  "v=j
-   o=jdoe 2890844526 2890842807 IN IP4 10.47.16.5
-   s=SDP Seminar
-   i=A Seminar on the session description protocol
-   u=http://www.example.com/seminars/sdp.pdf
-   e=j.doe@example.com (Jane Doe)
-   p=+44 (0)1226 241814
-   c=IN IP4 224.2.17.12/127
-   b=CT:128
-   t=2873397496 2873404696
-   r=7d 1h 0 25h
-   t=2879947328 2884457638
-   t=2947393048 2958437394
-   z=2882844526 -1h 2898848070 0
-   k=clear:gf638ebi3rh3i3o3e35767
-   a=recvonly
-   m=audio 49170 RTP/AVP 0
-   i=Media title
-   c=IN IP4 224.2.17.14/127
-   b=AT:14
-   a=recvonly
-   a=ctlmethod:serverpush
-   m=video 51372 RTP/AVP 992882844526
-   a=rtpmap:99 h263-1998/90000")
-
-;; An SDP session description consists of a session-level section followed by
-;; zero or more media-level sections.  The session-level part starts with a
-;; "v=" line and continues to the first media-level section.  Each media-level
-;; section starts with an "m=" line and continues to the next media-level
-;; section or end of the whole session description.  In general, session-level
-;; values are the default for all media unless overridden by an equivalent
-;; media-level value.
-
-;; Some lines in each description are REQUIRED and some are OPTIONAL, but all
-;; MUST appear in exactly the order given here (the fixed order greatly
-;; enhances error detection and allows for a simple parser).
-
-(def structure
+(def line-order
+  "Some lines in each description are REQUIRED and some are OPTIONAL, but all
+  MUST appear in exactly the order given here."
   {:session
    {:v #{:o}
     :o #{:s}
@@ -332,7 +270,7 @@
         ([result] (xf result))
         ([result {:keys [type line-number section] :as line}]
          (let [allowed @allowed-lines
-               possibilities (get-in structure [section type])]
+               possibilities (get-in line-order [section type])]
            (when possibilities
              (vreset! allowed-lines possibilities))
            (cond
@@ -369,29 +307,3 @@
                         insert
                        (fn [final key parsed] (conj final parsed)))]
         (insert result name parsed)))))
-
-(defn parse
-  "Given an SDP string, parses the description into its data structure
-  representation. The following flags are supported:
-
-  :relaxed        Attempts to continue parsing an invalid SDP description,
-                  skipping erronious lines and providing default values where
-                  required."
-  [sdp-string & flags]
-  (let [{:keys [relaxed]} (set flags)
-        prep-lines (comp (remove string/blank?)
-                         (map mapify-lines)
-                         add-line-numbers
-                         add-sections
-                         (check-line-order relaxed))]
-    (->> sdp-string
-         string/split-lines
-         (transduce prep-lines (completing (parse-lines relaxed)) {}))))
-
-(parse test-sdp-string)
-
-(defn emit
-  "Emits the SDP description string for the provided media session
-  data structure."
-  [session]
-  nil)
