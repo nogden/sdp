@@ -3,11 +3,19 @@
  :source-paths #{"src"}
  :dependencies '[[org.clojure/clojure "1.7.0"]
                  [org.clojure/tools.logging "0.3.1"]
-                 [dire "0.5.3"]])
+                 [dire "0.5.3"]
+                 ;; Dev dependancies
+                 [it.frbracch/boot-marginalia "0.1.2" :scope "test"]])
+
+(require '[it.frbracch.boot-marginalia :refer [marginalia pom-option]])
 
 (task-options!
  pom
- {:project 'sdp
+ {:project 'multimedia.streaming/sdp
   :version "0.1.0"
-  :description "A library for parsing and emitting Session Description Protocol."}
- repl {:init-ns 'sdp.core})
+  :description "A parser and emitter for the Session Description Protocol (SDP)
+                as described in RFC 4566."}
+ repl
+ {:init-ns 'multimedia.streaming.sdp}
+ marginalia
+ {:file "sdp.html"})
