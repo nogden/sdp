@@ -92,7 +92,7 @@
        :parse-as :phone
        :insert vectorize}
    :c {:name :connection
-       :parse-as {:separator #"\s+"
+       :parse-as {:separator #"\s+|/"
                   :fields [{:name :network-type
                             :parse-as :string
                             :expect #{"IN"}}
@@ -100,7 +100,9 @@
                             :parse-as :string
                             :expect #{"IP4" "IP6"}}
                            {:name :address
-                            :parse-as :address}]}
+                            :parse-as :address}
+                           {:name :ttl
+                            :parse-as :ttl}]}
        :insert {:session vectorize
                 :media (vectorize-in-last :media-descriptions)}}
    :b {:name :bandwidth
@@ -184,7 +186,8 @@
    :address identity
    :email identity
    :phone identity
-   :port identity})
+   :port identity
+   :ttl identity})
 
 (def error-fns
   "Error handlers for parsing errors."
@@ -226,12 +229,15 @@
   "Parses a compound field described by rule and returns the parsed value."
   [{spec :parse-as name :name} value line-num relaxed]
   (let [fields (string/split value (:separator spec))
-        field-rules (if (get-in spec [:fields :repeats?])
+        field-rules (if (:repeats? spec)
                       (cycle (:fields spec))
                       (:fields spec))
         parsed (map parse-simple-field field-rules fields
                     (repeat line-num) (repeat relaxed))]
-    {name (apply merge parsed)}))
+    (if (:repeats? spec)
+      {name (into [] (map (partial apply merge)
+                          (partition (count (:fields spec)) parsed)))}
+      {name (apply merge parsed)})))
 
 (defn mapify-lines
   "Splits an SDP line into a map of its component parts."

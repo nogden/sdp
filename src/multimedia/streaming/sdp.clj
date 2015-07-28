@@ -56,7 +56,7 @@
    m=audio 49170 RTP/AVP 0
    i=Media title
    c=IN IP4 224.2.17.14/127
-   c=IN IP4 224.2.17.18/127
+   c=IN IP4 224.2.17.18
    b=AT:14
    a=recvonly
    a=ctlmethod:serverpush
@@ -134,8 +134,10 @@
              :repeat [{:repeat-interval "7d"
                        :active-duration "1h"
                        :offsets-from-start "0"}]}]
-   :timezone {:adjustment-time 2882844526N
-              :offset "-1h"}
+   :timezone [{:adjustment-time 2882844526N
+               :offset "-1h"}
+              {:adjustment-time 2898848070N
+               :offset "0"}]
    :encryption-key {:method "clear"
                     :payload "gf638ebi3rh3i3o3e35767"}
    :attributes [{:attribute "recvonly"}]
