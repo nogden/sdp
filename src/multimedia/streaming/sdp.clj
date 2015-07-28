@@ -56,7 +56,7 @@
    m=audio 49170 RTP/AVP 0
    i=Media title
    c=IN IP4 224.2.17.14/127
-   c=IN IP4 224.2.17.18
+   c=IN IP4 224.2.17.18/225
    b=AT:14
    a=recvonly
    a=ctlmethod:serverpush

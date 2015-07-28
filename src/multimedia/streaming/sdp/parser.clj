@@ -3,6 +3,7 @@
   providing the utility functions used within the parser. It is __not__ part of
   the published interface and may change without warning between versions."
   (:require [clojure.string :as string]
+            [clojure.core.match :refer [match]]
             [clojure.tools.logging :as log]
             [dire.core :refer [with-handler!]]))
 
@@ -101,8 +102,7 @@
                             :expect #{"IP4" "IP6"}}
                            {:name :address
                             :parse-as :ip-address}]}
-       :insert {:session vectorize
-                :media (vectorize-in-last :media-descriptions)}}
+       :insert {:media (vectorize-in-last :media-descriptions)}}
    :b {:name :bandwidth
        :parse-as {:separator #":"
                   :fields [{:name :bandwidth-type
@@ -172,20 +172,62 @@
       (throw (Exception. issue))
       value)))
 
+(defn integer-in-range
+  "Returns a parsing function that parses an integer and returns it if it is
+  in the range of `min` and `max` inclusive. Otherwise an exception is thrown."
+  [min max]
+  (fn [raw]
+    (let [value (Integer. raw)]
+      (if (<= min value max)
+        value
+        (throw (Exception. (str "Value '" raw "' is outside the legal range "
+                                "(min: " min ", max: " max ")")))))))
+
+(defn parse-ip-address
+  "`parse-ip-address` is a parsing function that will parse an IP version 4 or
+  IP version 6 address, an optional TTL value and an optional address count
+  from a string. The string must be in the following format.
+
+    <ip-address>[/ttl][/address-count]
+
+  This is parsed into the following structure.
+
+    {:address java.net.Inet[4|6]Address
+     :ttl ttl
+     :address-count address-count}
+
+  If parsing fails and exception is thrown."
+  [raw]
+  (let [[ip ttl address-count] (string/split raw #"/" 3)
+        address (java.net.InetAddress/getByName ip)
+        result {:address address}
+        IPv4 java.net.Inet4Address
+        IPv6 java.net.Inet6Address]
+    (match [(class address) ttl address-count]
+      [IPv4 nil nil]   (if (.isMulticastAddress address)
+                         (throw (Exception. (str "Multicast IPv4 address "
+                                                 "requires a TTL value")))
+                       result)
+      [IPv4 ttl nil]   (assoc result :ttl ((integer-in-range 0 255) ttl))
+      [IPv4 ttl count] (assoc result :ttl ((integer-in-range 0 255) ttl)
+                                     :address-count (Integer. count))
+      [IPv6 nil nil]   result
+      [IPv6 count nil] (assoc result :address-count (Integer. count))
+      [IPv6 _ _]       (throw (Exception. "TTL value not allowed for IPv6")))))
+
 (def ^:dynamic parse-fns
   "The set of functions used to parse individual SDP field types."
   {:string identity
    :integer #(Integer. %)
-   :numeric-string (throw-if-nil "String '%v' is not alphanumeric"
+   :numeric-string (throw-if-nil "String is not alphanumeric"
                                  #(re-matches #"[0-9|A-Z|a-z]*" %))
    :instant bigint
    :duration identity
    :host identity
-   :ip-address identity
+   :ip-address parse-ip-address
    :email identity
    :phone identity
-   :port identity
-   :ttl identity})
+   :port (integer-in-range 0 65535)})
 
 (def error-fns
   "Error handlers for parsing errors."
@@ -222,6 +264,11 @@
                             ((func error-fns) [rule value param line-num e]))
      :else                ((:error error-fns) [rule value line-num e]))))
 
+(defn flatten-fields
+  "Flattens any value in coll that is a map, into coll."
+  [coll]
+  (reduce (fn [r [k v]] (if (map? v) (merge r v) (assoc r k v))) {} coll))
+
 (defn parse-compound-field
   "Parses a compound field described by rule and returns the parsed value."
   [{{:keys [repeats? separator] field-rules :fields} :parse-as name :name}
@@ -237,7 +284,7 @@
                          (repeat line-num) (repeat relaxed))]
     (if repeats?
       {name (into [] parsed)}
-      {name (reduce merge parsed)})))
+      {name (transduce (map flatten-fields) merge parsed)})))
 
 (defn mapify-lines
   "Splits an SDP line into a map of its component parts."

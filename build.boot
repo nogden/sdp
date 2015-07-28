@@ -2,6 +2,7 @@
 (set-env!
  :source-paths #{"src"}
  :dependencies '[[org.clojure/clojure "1.7.0"]
+                 [org.clojure/core.match "0.3.0-alpha4"]
                  [org.clojure/tools.logging "0.3.1"]
                  [dire "0.5.3"]
                  ;; Dev dependancies
