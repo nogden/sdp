@@ -1,5 +1,11 @@
+(ns multimedia.streaming.sdp
+  "The multimedia.streaming.sdp namespace provides the published API for
+  parsing and emitting SDP strings."
+  (:require [multimedia.streaming.sdp.parser :as parser]
+            [clojure.string :as string]))
+
 ;; # What is SDP?
-;;
+
 ;; SDP is intended for describing multimedia sessions for the purposes of
 ;; session announcement, session invitation and other forms of multimedia
 ;; session initiation.
@@ -10,15 +16,6 @@
 ;; the full ISO 10646 character set. Field and attribute values that use the
 ;; full UTF-8 character set are never directly compared, hence there is no
 ;; requirement for UTF-8 normalisation.
-
-(ns multimedia.streaming.sdp
-  "The multimedia.streaming.sdp namespace provides the published API for
-  parsing and emitting SDP strings."
-  (:require [multimedia.streaming.sdp.parser :refer [mapify-lines
-                                                     add-line-numbers
-                                                     add-sections
-                                                     check-line-order]]
-            [clojure.string :as string]))
 
 ;; # An Example
 
@@ -59,6 +56,7 @@
    m=audio 49170 RTP/AVP 0
    i=Media title
    c=IN IP4 224.2.17.14/127
+   c=IN IP4 224.2.17.18/127
    b=AT:14
    a=recvonly
    a=ctlmethod:serverpush
@@ -85,21 +83,35 @@
   `:relaxed` attempts to continue parsing an invalid SDP description, skipping
   erronious lines and providing default values where required.
 
-    (parse example-sdp-string :relaxed)"
+    (parse example-sdp-string :relaxed)
+
+  See [[Custom Representations]] for information on how to change the data
+  representations of the parsed fields."
   [sdp-string & flags]
   (let [{:keys [relaxed]} (set flags)
         prep-lines (comp (remove string/blank?)
-                         (map mapify-lines)
-                         add-line-numbers
-                         add-sections
-                         (check-line-order relaxed))]
+                         (map parser/mapify-lines)
+                         parser/add-line-numbers
+                         parser/add-sections
+                         (parser/check-line-order relaxed))]
     (->> sdp-string
          string/split-lines
-         (transduce prep-lines (completing (parse-lines relaxed)) {}))))
+         (transduce prep-lines (completing (parser/parse-lines relaxed)) {}))))
 
 ;; # SDP Description Structure
 
 (def example-sdp-description
+  "The parsed SDP description is a map containing at least the `:version`,
+  `:origin` and `:name` keys, and optionally any of the additional keys shown
+  here.
+
+  Note that keys are shown here in parsing order for clarity, however the
+  parsed map is unordered.
+
+  Top level keys represent session level fields. The individual media level
+  fields are found under the `:media-descriptions` key.
+
+  Vectors indicate that any number of entries is possible for that field."
   {:version 0
    :origin {:username "jdoe"
             :session-id "2890844526"
@@ -153,6 +165,42 @@
   "The `emit` function serialises the provided `sdp-description` into its
   textual form and retuns the string representation.
 
-    (emit example-sdp-description)"
-  [session]
-  nil)
+    (emit example-sdp-description)
+
+  This function is not currently implemented."
+  [sdp-description]
+  :not-implemented)
+
+;; # Custom Representations
+
+;; Each field in the SDP structure is parsed as a specific type. For each type
+;; there exists a parsing function that is called to produce the field value
+;; from the textual representation. It is sometimes useful to provide a custom
+;; parsing function that will return types suitable to the application at hand.
+;; For example, an application built upon the Java 8 platform may wish to parse
+;; instants as `java.time.Instant`, whereas an application using an older
+;; platform may wish to use the JodaTime library constructs or a basic
+;; `java.util.DateTime`.
+
+(defn use-custom-parsers!
+  "The `custom-parser-for!` function overrides the default parsing functions
+  with those specified in `parser-map`.
+
+    (use-custom-parsers!
+      {:port identity
+       :instant (fn [raw] ...)})
+
+  The supplied parsing functions must accept the raw value as a string and
+  return the parsed representation.
+
+  Parsers can be specified for any of the fields listed in the `parser-fns` map
+  detailed in the `multimedia.streaming.sdp.parser` namespace.
+
+  Calling this function will affect all future invocations of `parse` on all
+  threads."
+  [parser-map]
+  (alter-var-root #'parse
+    (fn [f]
+      (fn [sdp-string & flags]
+        (binding [parser/parse-fns (merge parser/parse-fns parser-map)]
+          (apply f example-sdp-string flags))))))

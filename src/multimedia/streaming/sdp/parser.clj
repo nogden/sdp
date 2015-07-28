@@ -27,7 +27,7 @@
    :media
    {:m #{:m :i :c :b :k :a}
     :i #{:m :c :b :k :a}
-    :c #{:m :b :k :a}
+    :c #{:c :m :b :k :a}
     :b #{:m :k :a}
     :k #{:m :a}
     :a #{:m :a}}})
@@ -35,7 +35,9 @@
 (defn vectorize
   "Collate duplicate elements of this type into a vector under the same key."
   [final key element]
-  (update-in final [key] (fnil conj []) (key element)))
+  (if (vector? (key element))
+    (update-in final [key] into (key element))
+    (update-in final [key] (fnil conj []) (key element))))
 
 (defn in-last
   "Inserts an element of this type under the most recent entry for parent."
@@ -50,7 +52,9 @@
   [parent]
   (fn [final key element]
     (let [index (dec (count (parent final)))]
-      (update-in final [parent index key] (fnil conj []) (key element)))))
+      (if (vector? (key element))
+        (update-in final [parent index key] into (key element))
+        (update-in final [parent index key] (fnil conj []) (key element))))))
 
 (def parse-rules
   "The rules that determine how each field is parsed."
@@ -97,7 +101,8 @@
                             :expect #{"IP4" "IP6"}}
                            {:name :address
                             :parse-as :address}]}
-       :insert {:media (in-last :media-descriptions)}}
+       :insert {:session vectorize
+                :media (vectorize-in-last :media-descriptions)}}
    :b {:name :bandwidth
        :parse-as {:separator #":"
                   :fields [{:name :bandwidth-type
@@ -167,7 +172,7 @@
       (throw (Exception. issue))
       value)))
 
-(def parse-fns
+(def ^:dynamic parse-fns
   "The set of functions used to parse individual SDP field types."
   {:string identity
    :integer #(Integer. %)
