@@ -76,7 +76,7 @@
                             :parse-as :string
                             :expect #{"IP4" "IP6"}}
                            {:name :address
-                            :parse-as :unicast-address}]}}
+                            :parse-as :host}]}}
    :s {:name :name
        :parse-as :string
        :on-fail [:default-to " "]}
@@ -92,7 +92,7 @@
        :parse-as :phone
        :insert vectorize}
    :c {:name :connection
-       :parse-as {:separator #"\s+|/"
+       :parse-as {:separator #"\s+"
                   :fields [{:name :network-type
                             :parse-as :string
                             :expect #{"IN"}}
@@ -100,9 +100,7 @@
                             :parse-as :string
                             :expect #{"IP4" "IP6"}}
                            {:name :address
-                            :parse-as :address}
-                           {:name :ttl
-                            :parse-as :ttl}]}
+                            :parse-as :ip-address}]}
        :insert {:session vectorize
                 :media (vectorize-in-last :media-descriptions)}}
    :b {:name :bandwidth
@@ -182,8 +180,8 @@
                                  #(re-matches #"[0-9|A-Z|a-z]*" %))
    :instant bigint
    :duration identity
-   :unicast-address identity
-   :address identity
+   :host identity
+   :ip-address identity
    :email identity
    :phone identity
    :port identity
@@ -208,12 +206,11 @@
   "Parses an atomic field using the specified parse function and returns the
   parsed value."
   [{:keys [parse-as name expect]} value line-num relaxed]
-  (let [parsed ((parse-as parse-fns) value)
-        result {name parsed}]
+  (let [parsed ((parse-as parse-fns) value)]
     (when-not (or (nil? expect) (expect parsed))
         (log/debug "Non-standard value '" parsed "' for '" name "' on line "
                    line-num ", expected one of " expect))
-    result))
+    {name parsed}))
 
 (with-handler! #'parse-simple-field
   "Handle parse errors using the error handlers defined in error-fns."
@@ -227,17 +224,20 @@
 
 (defn parse-compound-field
   "Parses a compound field described by rule and returns the parsed value."
-  [{spec :parse-as name :name} value line-num relaxed]
-  (let [fields (string/split value (:separator spec))
-        field-rules (if (:repeats? spec)
-                      (cycle (:fields spec))
-                      (:fields spec))
-        parsed (map parse-simple-field field-rules fields
-                    (repeat line-num) (repeat relaxed))]
-    (if (:repeats? spec)
-      {name (into [] (map (partial apply merge)
-                          (partition (count (:fields spec)) parsed)))}
-      {name (apply merge parsed)})))
+  [{{:keys [repeats? separator] field-rules :fields} :parse-as name :name}
+   value line-num relaxed]
+  (let [fields (string/split value separator)
+        [field-rules parse-fn] (if repeats?
+                                 [(cycle field-rules)
+                                  (comp (map parse-simple-field)
+                                        (partition-all (count field-rules))
+                                        (map (partial apply merge)))]
+                                 [field-rules (map parse-simple-field)])
+        parsed (sequence parse-fn field-rules fields
+                         (repeat line-num) (repeat relaxed))]
+    (if repeats?
+      {name (into [] parsed)}
+      {name (reduce merge parsed)})))
 
 (defn mapify-lines
   "Splits an SDP line into a map of its component parts."
