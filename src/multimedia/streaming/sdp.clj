@@ -1,5 +1,5 @@
 (ns multimedia.streaming.sdp
-  "The multimedia.streaming.sdp namespace provides the published API for
+  "The `multimedia.streaming.sdp` namespace provides the published API for
   parsing and emitting SDP strings."
   (:require [multimedia.streaming.sdp.parser :as parser]
             [clojure.string :as string]))
@@ -9,10 +9,10 @@
 ;; SDP is intended for describing multimedia sessions for the purposes of
 ;; session announcement, session invitation and other forms of multimedia
 ;; session initiation.
-
+;;
 ;; An SDP session description is entirely textual using the ISO 10646 character
 ;; set in UTF-8 encoding.  SDP field names and attribute names use only the
-;; US-ASCII subset of UTF-8, but textual fields and attribute values MAY use
+;; US-ASCII subset of UTF-8, but textual fields and attribute values may use
 ;; the full ISO 10646 character set. Field and attribute values that use the
 ;; full UTF-8 character set are never directly compared, hence there is no
 ;; requirement for UTF-8 normalisation.
@@ -21,23 +21,23 @@
 
 (def example-sdp-string
   "An SDP session description consists of a number of lines of text of the
-  form:
+  form
 
-  type=value
+    type=value
 
-  where _type_ MUST be exactly one case-significant character and <value> is
-  structured text whose format depends on <type>.  In general, <value> is
+  where `type` must be exactly one case-significant character and `value` is
+  structured text whose format depends upon `type`.  In general, `value` is
   either a number of fields delimited by a single space character or a free
   format string, and is case-significant unless a specific field defines
-  otherwise.  Whitespace MUST NOT be used on either side of the '=' sign.
+  otherwise.  Whitespace must not be used on either side of the `=` sign.
 
-  An SDP session description consists of a session-level section followed by
-  zero or more media-level sections.  The session-level part starts with a
-  'v=' line and continues to the first media-level section.  Each media-level
-  section starts with an 'm=' line and continues to the next media-level
-  section or end of the whole session description.  In general, session-level
-  values are the default for all media unless overridden by an equivalent
-  media-level value."
+  Session descriptions are divided into sections and consist of a session-level
+  section followed by zero or more media-level sections.  The session-level
+  part starts with a 'v=' line and continues to the first media-level section.
+  Each media-level section starts with an 'm=' line and continues to the next
+  media-level section or to the end of the whole session description.  In
+  general, session-level values are the default for all media unless overridden
+  by an equivalent media-level value."
 
   "v=0
    o=jdoe 2890844526 2890842807 IN IP4 10.47.16.5
@@ -86,7 +86,7 @@
     (parse example-sdp-string :relaxed)
 
   See Custom Representations for information on how to change the data
-  representations of the parsed fields."
+  representation of the parsed fields."
   [sdp-string & flags]
   (let [{:keys [relaxed]} (set flags)
         prep-lines (comp (remove string/blank?)
@@ -146,9 +146,10 @@
                          :protocol "RTP/AVP"
                          :format "0"
                          :information "Media title"
-                         :connection {:network-type "IN"
-                                      :address-type "IP4"
-                                      :address "224.2.17.14/127"}
+                         :connection [{:network-type "IN"
+                                       :address-type "IP4"
+                                       :address "224.2.17.14"
+                                       :ttl 127}]
                          :bandwidth [{:bandwidth-type "AT"
                                       :bandwidth 14}]
                          :attributes [{:attribute "recvonly"}

@@ -15,7 +15,7 @@
  {:project 'multimedia.streaming/sdp
   :version "0.1.0"
   :description "A parser and emitter for the Session Description Protocol (SDP)
-                as described in RFC 4566."}
+                as described by RFC 4566."}
  repl
  {:init-ns 'multimedia.streaming.sdp}
  marginalia
