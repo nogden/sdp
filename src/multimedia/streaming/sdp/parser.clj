@@ -1,15 +1,66 @@
 (ns multimedia.streaming.sdp.parser
-  "The multimedia.streaming.sdp.parser namespace is an internal namespace
-  providing the utility functions used within the parser. It is __not__ part of
-  the published interface and may change without warning between versions."
+  "The `multimedia.streaming.sdp.parser` namespace is an internal namespace
+  providing the implementation of the parser. It is __not__ part of the
+  published interface and may change without warning between versions."
   (:require [clojure.string :as string]
             [clojure.core.match :refer [match]]
             [clojure.tools.logging :as log]
             [dire.core :refer [with-handler!]]))
 
+;; # Parser Implementation
+
+;; The parser implementation is intended to be as declarative as possible. It
+;; consists of three main parts:
+;;
+;; - The input preparation pipeline,
+;; - the parser configuration, and
+;; - the execution core.
+;;
+;; When data is fed to the parser it is first processed by the input
+;; preparation pipeline. This performs some simple transformations on the input
+;; to make the parsers job easier. The prepared input is then fed to the parser
+;; which parses the various fields, using a set of overridable parsing
+;; functions and inserts them into the parsed structure according to the rules
+;; in the parser configuration.
+
+;; ## Input Preparation
+
+;; The input preperation pipeline is implemented as the following set of
+;; composed transducers.
+
+(defn mapify-lines
+  "`mapify-lines` transforms a textual SDP `line` into a map of its component
+  parts."
+  [line]
+  (let [[k v] (string/split line #"=" 2)]
+    {:type (keyword (string/trim k)) :value (string/triml v)}))
+
+(defn add-line-numbers
+  "`add-line-numbers` is a stateful transducer that adds a line number to each
+  line. This allows the parser to produce much better error messages."
+  [xf]
+  (let [line-number (volatile! 0)]
+    (fn ([] (xf))
+        ([result] (xf result))
+        ([result input]
+         (xf result (assoc input :line-number (vswap! line-number inc)))))))
+
+(defn add-sections
+  "`add-sections` is a stateful transducer that adds a section identifier to
+  each line, indicating to the parser whether it is currently parsing a session
+  level line, or a media level line."
+  [xf]
+  (let [section (volatile! :session)]
+    (fn ([] (xf))
+        ([result] (xf result))
+        ([result {line-type :type :as input}]
+         (when (= :m line-type)
+           (vreset! section :media))
+         (xf result (assoc input :section @section))))))
+
 (def line-order
-  "Some lines in each description are REQUIRED and some are OPTIONAL, but all
-  MUST appear in exactly the order given here."
+  "SDP has a strict line order. The `line-order` structure specifies, for each
+  line type, which line types may follow."
   {:session
    {:v #{:o}
     :o #{:s}
@@ -33,32 +84,150 @@
     :k #{:m :a}
     :a #{:m :a}}})
 
+
+(defn check-line-order
+  "`check-line-order` returns a transducer that verifies that the SDP lines are
+  in the expected order as defined in the `line-order` structure. If the lines
+  are not in the expected order an exception is thrown. The following flags are
+  supported.
+
+  `:relaxed` causes bad ordering to be treated as a non-fatal error that simply
+  generates a warning."
+  [& flags]
+  (fn [xf]
+    (let [{:keys [relaxed]} (set flags)
+          allowed-lines (volatile! #{:v})]
+      (fn ([] (xf))
+        ([result] (xf result))
+        ([result {:keys [type line-number section] :as line}]
+         (let [allowed @allowed-lines
+               possibilities (get-in line-order [section type])]
+           (when possibilities
+             (vreset! allowed-lines possibilities))
+           (cond
+            (allowed type) (xf result line)
+            relaxed (do (log/warn "Skipping illegal line type '" type
+                                  "' on line " line-number ", expected one of "
+                                  allowed) result)
+            :else   (throw
+                     (ex-info (str "Illegal line type '" type "' on line "
+                                   line-number ", expected one of " allowed)
+                              {:error-type :illegal-line-type
+                               :expected allowed
+                               :received type
+                               :line-number line-number})))))))))
+
+;; The input data leaves the input preparation stage as a sequence of maps that
+;; contain all the information needed for the parsing stage. Additionally, if
+;; the parser is in its default strict mode, the lines are guaranteed to be in
+;; the correct order.
+
+;; ## Parser Configuration
+
+;; The behaviour of the parser is dictated by the parser configuration. This
+;; configuration describes the structure of the SDP protocol, how each field
+;; should be parsed and how it should be inserted into the parsed SDP
+;; description.
+
+;; ### Insert Functions
+
+;; The following functions provide the options for inserting a parsed field
+;; into the SDP description.
+
 (defn vectorize
-  "Collate duplicate elements of this type into a vector under the same key."
-  [final key element]
-  (if (vector? (key element))
-    (update-in final [key] into (key element))
-    (update-in final [key] (fnil conj []) (key element))))
+  "`vectorize` is an insert function that causes the parsed `field` to be
+  inserted into the `sdp` description as a vector under `key`. Multiple fields
+  of the same type, within the same section, are appended to the vector."
+  [sdp key field]
+  (if (vector? (key field))
+    (update-in sdp [key] into (key field))
+    (update-in sdp [key] (fnil conj []) (key field))))
 
 (defn in-last
-  "Inserts an element of this type under the most recent entry for parent."
+  "`in-last` returns an insert function that causes the parsed `field` to be
+  inserted as the value of `key` under the last entry in `parent`, where
+  `parent` is a key in the final `sdp` structure, whose value is a vector.
+  For example
+
+    (in-last :media-descriptions)
+
+  would add `field` as the value of `key` to the most recent entry under
+  :media-descriptions."
   [parent]
-  (fn [final key element]
-    (let [index (dec (count (parent final)))]
-      (assoc-in final [parent index key] (key element)))))
+  (fn [sdp key field]
+    (let [index (dec (count (parent field)))]
+      (assoc-in sdp [parent index key] (key field)))))
 
 (defn vectorize-in-last
-  "Insert elements of this type into a vector under the most recent entry for
-  parent."
+  "`vectorize-in-last` returns an insert function that causes the parsed
+  `field` to be inserted as a vector, which is the value of `key`, in the last
+  entry in `parent`, where `parent` is a key in the final `sdp` structure.
+  Multiple fields of the same type, within the same section, are appended to
+  the vector. For example
+
+    (vectorize-in-last :media-descriptions)
+
+  would add `field` to the vector, which is the value of `key` in the most
+  recent entry under :media-descriptions.
+  "
   [parent]
-  (fn [final key element]
-    (let [index (dec (count (parent final)))]
-      (if (vector? (key element))
-        (update-in final [parent index key] into (key element))
-        (update-in final [parent index key] (fnil conj []) (key element))))))
+  (fn [sdp key field]
+    (let [index (dec (count (parent field)))]
+      (if (vector? (key field))
+        (update-in sdp [parent index key] into (key field))
+        (update-in sdp [parent index key] (fnil conj []) (key field))))))
+
+;; ### Parse Rules
 
 (def parse-rules
-  "The rules that determine how each field is parsed."
+  "The `parse-rules` structure defines the rules for parsing the fields of the
+  SDP protocol. It also specifies how the parsed fields should be combined into
+  the final structure.
+
+  At the top level, the `parse-rules` structure maps SDP line-types to the rule
+  to the appropriate parsing rule. Each parsing rule consists of the following
+  fields.
+
+  `:name` is required and specifies the key, in the final SDP structure, under
+  which the parsed field should be inserted.
+
+  `:parse-as` is required and specifies how the field should be parsed. Its
+  value may be either
+
+  - a keyword matching one of the parsing functions in the `parse-fns`
+    structure, appropriate for atomic fields; or
+  - a parse-spec as defined below.
+
+`:on-fail` is optional and specifies how to recover from an error when in
+  relaxed parsing mode. Its value must be either
+
+  - a keyword matching one of the error handling functions in the `error-fns`
+    structure, or
+  - a two element vector, where the first element is a keyword matching one of
+    the error handling functions in `error-fns` and whose second element is the
+    parameter to that function.
+
+If the key is not present, errors for that field are always treated as fatal.
+
+  `:insert` is optional and specifies how the parsed field is inserted into the
+  final SDP structure. Its value may be either
+
+  - an insert function, to be used for all parsed values; or
+  - a map whose keys are section identifiers and whose values are insert
+    functions, each to be used when parsing values from the corresponding
+    section.
+
+If the key is not present, the field is inserted at the top level of the SDP
+  structure. In the event of multiple values for the same field, only the last
+  value will be present in the SDP structure.
+
+  __Parse Spec__
+
+  A parse-spec describes how to parse a compound field. It comprises a map with
+  the following keys.
+
+
+  "
   {:v {:name :version
        :parse-as :integer
        :on-fail [:default-to 0]}
@@ -285,64 +454,6 @@
     (if repeats?
       {name (into [] parsed)}
       {name (transduce (map flatten-fields) merge parsed)})))
-
-(defn mapify-lines
-  "Splits an SDP line into a map of its component parts."
-  [line]
-  (let [[k v] (string/split line #"=" 2)]
-    {:type (keyword (string/trim k)) :value (string/triml v)}))
-
-(defn add-line-numbers
-  "A stateful transducer that adds a line number to each line."
-  [xf]
-  (let [line-number (volatile! 0)]
-    (fn ([] (xf))
-        ([result] (xf result))
-        ([result input]
-         (xf result (assoc input :line-number (vswap! line-number inc)))))))
-
-(defn add-sections
-  "A stateful transducer that adds the a section identifier to each line."
-  [xf]
-  (let [section (volatile! :session)]
-    (fn ([] (xf))
-        ([result] (xf result))
-        ([result {line-type :type :as input}]
-         (when (= :m line-type)
-           (vreset! section :media))
-         (xf result (assoc input :section @section))))))
-
-(defn check-line-order
-  "Returns a transducer that ensures that the SDP lines are in the expected
-  order. If the lines are not in the expected the error details are added to
-  the output and the reduction is terminated. The following flags are
-  supported:
-
-  :relaxed        Causes bad ordering to be treated as a non-fatal error that
-                  only generates a log message."
-  [& flags]
-  (fn [xf]
-    (let [{:keys [relaxed]} (set flags)
-          allowed-lines (volatile! #{:v})]
-      (fn ([] (xf))
-        ([result] (xf result))
-        ([result {:keys [type line-number section] :as line}]
-         (let [allowed @allowed-lines
-               possibilities (get-in line-order [section type])]
-           (when possibilities
-             (vreset! allowed-lines possibilities))
-           (cond
-            (allowed type) (xf result line)
-            relaxed (do (log/warn "Skipping illegal line type '" type
-                                  "' on line " line-number ", expected one of "
-                                  allowed) result)
-            :else   (throw
-                     (ex-info (str "Illegal line type '" type "' on line "
-                                   line-number ", expected one of " allowed)
-                              {:error-type :illegal-line-type
-                               :expected allowed
-                               :received type
-                               :line-number line-number})))))))))
 
 (defn parse-lines
   "Returns a reducing function that, given a map representation of an SDP line,

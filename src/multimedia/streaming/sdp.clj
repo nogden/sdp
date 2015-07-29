@@ -85,7 +85,7 @@
 
     (parse example-sdp-string :relaxed)
 
-  See [[Custom Representations]] for information on how to change the data
+  See Custom Representations for information on how to change the data
   representations of the parsed fields."
   [sdp-string & flags]
   (let [{:keys [relaxed]} (set flags)
