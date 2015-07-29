@@ -6,9 +6,7 @@ Protocol (SDP) as described by [RFC 4566](https://tools.ietf.org/html/rfc4566).
 
 Available on Clojars:
 
-```clojure
-    [multimedia.streaming/sdp]
-```
+Soon!
 
 ## Documentation
 
