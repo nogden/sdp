@@ -1,22 +1,25 @@
 # sdp
-A [Clojure](http://clojure.org) parser and emitter for the Session Description Protocol (SDP) as described by [RFC 4566](https://tools.ietf.org/html/rfc4566).
+A [Clojure](http://clojure.org) parser and emitter for the Session Description
+Protocol (SDP) as described by [RFC 4566](https://tools.ietf.org/html/rfc4566).
 
 ## Installation
 
 Available on Clojars:
 
+```clojure
     [multimedia.streaming/sdp]
+```
 
 ## Documentation
 
-Full API and implementation documentation is available [here](http://nogden.github.com/sdp/).
+Full API and implementation documentation is available [here](http://nogden.github.io/sdp/).
 
 ## Usage
 
 ```clojure
 (ns example
   (:require [multimedia.streaming.sdp :refer :all])
-  
+
 ;; Parse an SDP string
 (def description (parse example-sdp-string))
 
