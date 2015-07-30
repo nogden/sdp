@@ -142,7 +142,7 @@
                     :payload "gf638ebi3rh3i3o3e35767"}
    :attributes [{:attribute "recvonly"}]
    :media-descriptions [{:media-type "audio"
-                         :port "49170"
+                         :port 49170
                          :protocol "RTP/AVP"
                          :format "0"
                          :information "Media title"
@@ -156,7 +156,7 @@
                                       {:attribute "ctlmethod"
                                        :value "serverpush"}]}
                         {:media-type "video"
-                         :port "51372"
+                         :port 51372
                          :protocol "RTP/AVP"
                          :format "992882844526"
                          :attributes [{:attribute "rtpmap"
