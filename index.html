@@ -3195,7 +3195,7 @@ into the SDP description.</p>
 </td><td class="codes"><pre class="brush: clojure">(defn in-last
   [parent]
   (fn [sdp key field]
-    (let [index (dec (count (parent field)))]
+    (let [index (dec (count (parent sdp)))]
       (assoc-in sdp [parent index key] (key field)))))</pre></td></tr><tr><td class="docs"><p><code>vectorize-in-last</code> returns an insert function that causes the parsed
   <code>field</code> to be inserted as a vector, which is the value of <code>key</code>, in the last
   entry in <code>parent</code>, where <code>parent</code> is a key in the final <code>sdp</code> structure.
@@ -3210,7 +3210,7 @@ into the SDP description.</p>
 </td><td class="codes"><pre class="brush: clojure">(defn vectorize-in-last
   [parent]
   (fn [sdp key field]
-    (let [index (dec (count (parent field)))]
+    (let [index (dec (count (parent sdp)))]
       (if (vector? (key field))
         (update-in sdp [parent index key] into (key field))
         (update-in sdp [parent index key] (fnil conj []) (key field))))))</pre></td></tr><tr><td class="docs"><h3>Parse Rules</h3>
