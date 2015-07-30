@@ -155,7 +155,7 @@
   `:media-descriptions`."
   [parent]
   (fn [sdp key field]
-    (let [index (dec (count (parent field)))]
+    (let [index (dec (count (parent sdp)))]
       (assoc-in sdp [parent index key] (key field)))))
 
 (defn vectorize-in-last
@@ -172,7 +172,7 @@
   "
   [parent]
   (fn [sdp key field]
-    (let [index (dec (count (parent field)))]
+    (let [index (dec (count (parent sdp)))]
       (if (vector? (key field))
         (update-in sdp [parent index key] into (key field))
         (update-in sdp [parent index key] (fnil conj []) (key field))))))
