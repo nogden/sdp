@@ -1,6 +1,6 @@
 ;; Project configuration for Session Description Protocol library.
 (set-env!
- :source-paths #{"src"}
+ :resource-paths #{"src"}
  :dependencies '[[org.clojure/clojure "1.7.0"]
                  [org.clojure/core.match "0.3.0-alpha4"]
                  [org.clojure/tools.logging "0.3.1"]
