@@ -6,7 +6,7 @@ Protocol (SDP) as described by [RFC 4566](https://tools.ietf.org/html/rfc4566).
 
 Available on Clojars:
 
-Soon!
+[![Clojars Project](http://clojars.org/multimedia.streaming/sdp/latest-version.svg)](http://clojars.org/multimedia.streaming/sdp)
 
 ## Documentation
 
