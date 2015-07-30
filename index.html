@@ -2866,9 +2866,9 @@ net.brehaut.ClojureTools = (function (SH) {
     build_tree: build_tree
   };
 })(SyntaxHighlighter);
-</script><title>sdp -- Marginalia</title></head><body><table><tr><td class="docs"><div class="header"><h1 class="project-name">sdp</h1><h2 class="project-version">0.1.0</h2><br /><p>A parser and emitter for the Session Description Protocol (SDP)
+</script><title>sdp -- Marginalia</title></head><body><table><tr><td class="docs"><div class="header"><h1 class="project-name">sdp</h1><h2 class="project-version">0.1.0-SNAPSHOT</h2><br /><p>A parser and emitter for the Session Description Protocol (SDP)
                 as described by RFC 4566.</p>
-</div><div class="dependencies"><h3>dependencies</h3><table><tr><td class="dep-name">org.clojure/clojure</td><td class="dotted"><hr /></td><td class="dep-version">1.7.0</td></tr><tr><td class="dep-name">org.clojure/core.match</td><td class="dotted"><hr /></td><td class="dep-version">0.3.0-alpha4</td></tr><tr><td class="dep-name">org.clojure/tools.logging</td><td class="dotted"><hr /></td><td class="dep-version">0.3.1</td></tr><tr><td class="dep-name">dire</td><td class="dotted"><hr /></td><td class="dep-version">0.5.3</td></tr><tr><td class="dep-name">it.frbracch/boot-marginalia</td><td class="dotted"><hr /></td><td class="dep-version">0.1.2</td></tr></table></div></td><td class="codes" style="text-align: center; vertical-align: middle;color: #666;padding-right:20px"><br /><br /><br />(this space intentionally left almost blank)</td></tr><tr><td class="docs"><div class="toc"><a name="toc"><h3>namespaces</h3></a><ul><li><a href="#multimedia.streaming.sdp">multimedia.streaming.sdp</a></li><li><a href="#multimedia.streaming.sdp.parser">multimedia.streaming.sdp.parser</a></li></ul></div></td><td class="codes">&nbsp;</td></tr><tr><td class="docs"><div class="docs-header"><a class="anchor" href="#multimedia.streaming.sdp" name="multimedia.streaming.sdp"><h1 class="project-name">multimedia.streaming.sdp</h1><a class="toc-link" href="#toc">toc</a></a></div></td><td class="codes" /></tr><tr><td class="docs"><p>The <code>multimedia.streaming.sdp</code> namespace provides the published API for
+</div><div class="dependencies"><h3>dependencies</h3><table><tr><td class="dep-name">org.clojure/clojure</td><td class="dotted"><hr /></td><td class="dep-version">1.7.0</td></tr><tr><td class="dep-name">org.clojure/core.match</td><td class="dotted"><hr /></td><td class="dep-version">0.3.0-alpha4</td></tr><tr><td class="dep-name">org.clojure/tools.logging</td><td class="dotted"><hr /></td><td class="dep-version">0.3.1</td></tr><tr><td class="dep-name">dire</td><td class="dotted"><hr /></td><td class="dep-version">0.5.3</td></tr></table></div></td><td class="codes" style="text-align: center; vertical-align: middle;color: #666;padding-right:20px"><br /><br /><br />(this space intentionally left almost blank)</td></tr><tr><td class="docs"><div class="toc"><a name="toc"><h3>namespaces</h3></a><ul><li><a href="#multimedia.streaming.sdp">multimedia.streaming.sdp</a></li><li><a href="#multimedia.streaming.sdp.parser">multimedia.streaming.sdp.parser</a></li></ul></div></td><td class="codes">&nbsp;</td></tr><tr><td class="docs"><div class="docs-header"><a class="anchor" href="#multimedia.streaming.sdp" name="multimedia.streaming.sdp"><h1 class="project-name">multimedia.streaming.sdp</h1><a class="toc-link" href="#toc">toc</a></a></div></td><td class="codes" /></tr><tr><td class="docs"><p>The <code>multimedia.streaming.sdp</code> namespace provides the published API for
   parsing and emitting SDP strings.</p>
 </td><td class="codes"><pre class="brush: clojure">(ns multimedia.streaming.sdp
   (:require [multimedia.streaming.sdp.parser :as parser]
@@ -3000,7 +3000,7 @@ requirement for UTF-8 normalisation.</p>
                     :payload &quot;gf638ebi3rh3i3o3e35767&quot;}
    :attributes [{:attribute &quot;recvonly&quot;}]
    :media-descriptions [{:media-type &quot;audio&quot;
-                         :port &quot;49170&quot;
+                         :port 49170
                          :protocol &quot;RTP/AVP&quot;
                          :format &quot;0&quot;
                          :information &quot;Media title&quot;
@@ -3014,7 +3014,7 @@ requirement for UTF-8 normalisation.</p>
                                       {:attribute &quot;ctlmethod&quot;
                                        :value &quot;serverpush&quot;}]}
                         {:media-type &quot;video&quot;
-                         :port &quot;51372&quot;
+                         :port 51372
                          :protocol &quot;RTP/AVP&quot;
                          :format &quot;992882844526&quot;
                          :attributes [{:attribute &quot;rtpmap&quot;
