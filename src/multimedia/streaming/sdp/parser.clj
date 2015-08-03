@@ -298,7 +298,7 @@ If the key is not present, the field is inserted at the top level of the SDP
                             :parse-as :string
                             :expect #{"IP4" "IP6"}}
                            {:name :address
-                            :parse-as :ip-address}]}
+                            :parse-as :address}]}
        :insert {:media (vectorize-in-last :media-descriptions)}}
    :b {:name :bandwidth
        :parse-as {:separator #":"
@@ -448,7 +448,7 @@ If the key is not present, the field is inserted at the top level of the SDP
    :instant bigint
    :duration identity
    :host identity
-   :ip-address address
+   :address address
    :email identity
    :phone identity
    :port (integer-in-range 0 65535)})
