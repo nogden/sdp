@@ -1,11 +1,13 @@
 ;; Project configuration for Session Description Protocol library.
 (set-env!
  :resource-paths #{"src"}
+ :source-paths #{"test"}
  :dependencies '[[org.clojure/clojure "1.7.0"]
                  [org.clojure/core.match "0.3.0-alpha4"]
                  [org.clojure/tools.logging "0.3.1"]
                  [dire "0.5.3"]
                  ;; Dev dependencies
+                 [boot/core "2.1.2" :scope "provided"]
                  [it.frbracch/boot-marginalia "LATEST" :scope "test"]])
 
 (task-options!
@@ -35,3 +37,5 @@
   (require 'it.frbracch.boot-marginalia)
   (let [marginalia (resolve 'it.frbracch.boot-marginalia/marginalia)]
     (marginalia :file "sdp.html")))
+
+(require '[task :refer [tests]])
