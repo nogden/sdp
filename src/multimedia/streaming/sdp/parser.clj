@@ -389,39 +389,54 @@ If the key is not present, the field is inserted at the top level of the SDP
         (throw (Exception. (str "Value '" field "' is outside the legal range "
                                 "(min: " min ", max: " max ")")))))))
 
-(defn ip-address
-  "`ip-address` is a parse function that will parse an IP version 4 or IP
-  version 6 address, an optional TTL value and an optional address count from
-  the `field`. The string must be in the format
+(def ip4-address
+  "`ip4-address` is a regular expression that will match an IPv4 address."
+  #"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
 
-    <ip-address>[/ttl][/address-count]
+(defn multicast?
+  "`multicast?` is a utility function that, given an IP `address` string, will
+  return true if `address` is a multicast address."
+  [address]
+  (-> address
+      java.net.InetAddress/getByName
+      .isMulticastAddress))
+
+(defn address
+  "`address` is a parse function that will parse an IP version 4 address with
+  an optional TTL value and an optional address count, an IP version 6 address
+  with, an optional address count, or a fully qualified domain name from the
+  `field`. The string must be in the format
+
+    <address>[/ttl][/address-count]
 
   and is parsed into the structure
 
-    {:address java.net.Inet[4|6]Address
-     :ttl ttl
-     :address-count address-count}
+    {:address string
+     :ttl integer
+     :address-count integer}
 
   with the presence of the `:ttl` and `:address-count` keys being conditional
-  upon their presence in the input string. If parsing fails an exception is
-  thrown."
+  upon their presence in the input string."
   [field]
-  (let [[ip ttl address-count] (string/split field #"/" 3)
-        address (java.net.InetAddress/getByName ip)
-        result {:address address}
-        IPv4 java.net.Inet4Address
-        IPv6 java.net.Inet6Address]
-    (match [(class address) ttl address-count]
-      [IPv4 nil nil]   (if (.isMulticastAddress address)
-                         (throw (Exception. (str "Multicast IPv4 address "
-                                                 "requires a TTL value")))
+  (let [[address ttl address-count] (string/split field #"/" 3)
+        address-type (cond
+                       (re-matches ip4-address address) :IPv4
+                       (re-matches #".*:.*" address) :IPv6
+                       :else :FQDN)
+        result {:address address}]
+    (match [address-type ttl address-count]
+      [:IPv4 nil nil]   (if (multicast? address)
+                          (throw (Exception. (str "Multicast IPv4 address "
+                                                  "requires a TTL value")))
                          result)
-      [IPv4 ttl nil]   (assoc result :ttl ((integer-in-range 0 255) ttl))
-      [IPv4 ttl count] (assoc result :ttl ((integer-in-range 0 255) ttl)
-                                     :address-count (Integer. count))
-      [IPv6 nil nil]   result
-      [IPv6 count nil] (assoc result :address-count (Integer. count))
-      [IPv6 _ _]       (throw (Exception. "TTL value not allowed for IPv6")))))
+      [:IPv4 ttl nil]   (assoc result :ttl ((integer-in-range 0 255) ttl))
+      [:IPv4 ttl count] (assoc result :ttl ((integer-in-range 0 255) ttl)
+                                      :address-count (Integer. count))
+      [:IPv6 nil nil]   result
+      [:IPv6 count nil] (assoc result :address-count (Integer. count))
+      [:IPv6 _ _]       (throw (Exception. "TTL value not allowed for IPv6"))
+      [:FQDN nil nil]   result
+      [:FQDN _ _]       (throw (Exception. "TTL value not allowed for FQDN")))))
 
 (def ^:dynamic parse-fns
   "The `parse-fns` structure specifies which parse function should be used to
@@ -433,7 +448,7 @@ If the key is not present, the field is inserted at the top level of the SDP
    :instant bigint
    :duration identity
    :host identity
-   :ip-address ip-address
+   :ip-address address
    :email identity
    :phone identity
    :port (integer-in-range 0 65535)})
