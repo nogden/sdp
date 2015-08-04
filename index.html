@@ -2866,7 +2866,7 @@ net.brehaut.ClojureTools = (function (SH) {
     build_tree: build_tree
   };
 })(SyntaxHighlighter);
-</script><title>sdp -- Marginalia</title></head><body><table><tr><td class="docs"><div class="header"><h1 class="project-name">sdp</h1><h2 class="project-version">0.1.0-SNAPSHOT</h2><br /><p>A parser and emitter for the Session Description Protocol (SDP)
+</script><title>sdp -- Marginalia</title></head><body><table><tr><td class="docs"><div class="header"><h1 class="project-name">sdp</h1><h2 class="project-version">0.1.1-SNAPSHOT</h2><br /><p>A parser and emitter for the Session Description Protocol (SDP)
                 as described by RFC 4566.</p>
 </div><div class="dependencies"><h3>dependencies</h3><table><tr><td class="dep-name">org.clojure/clojure</td><td class="dotted"><hr /></td><td class="dep-version">1.7.0</td></tr><tr><td class="dep-name">org.clojure/core.match</td><td class="dotted"><hr /></td><td class="dep-version">0.3.0-alpha4</td></tr><tr><td class="dep-name">org.clojure/tools.logging</td><td class="dotted"><hr /></td><td class="dep-version">0.3.1</td></tr><tr><td class="dep-name">dire</td><td class="dotted"><hr /></td><td class="dep-version">0.5.3</td></tr></table></div></td><td class="codes" style="text-align: center; vertical-align: middle;color: #666;padding-right:20px"><br /><br /><br />(this space intentionally left almost blank)</td></tr><tr><td class="docs"><div class="toc"><a name="toc"><h3>namespaces</h3></a><ul><li><a href="#multimedia.streaming.sdp">multimedia.streaming.sdp</a></li><li><a href="#multimedia.streaming.sdp.parser">multimedia.streaming.sdp.parser</a></li></ul></div></td><td class="codes">&nbsp;</td></tr><tr><td class="docs"><div class="docs-header"><a class="anchor" href="#multimedia.streaming.sdp" name="multimedia.streaming.sdp"><h1 class="project-name">multimedia.streaming.sdp</h1><a class="toc-link" href="#toc">toc</a></a></div></td><td class="codes" /></tr><tr><td class="docs"><p>The <code>multimedia.streaming.sdp</code> namespace provides the published API for
   parsing and emitting SDP strings.</p>
@@ -3338,7 +3338,7 @@ functions to be used when parsing values from the corresponding section.</li>
                             :parse-as :string
                             :expect #{&quot;IP4&quot; &quot;IP6&quot;}}
                            {:name :address
-                            :parse-as :ip-address}]}
+                            :parse-as :address}]}
        :insert {:media (vectorize-in-last :media-descriptions)}}
    :b {:name :bandwidth
        :parse-as {:separator #&quot;:&quot;
@@ -3421,41 +3421,52 @@ atomic fields.</p>
       (if (&lt;= min value max)
         value
         (throw (Exception. (str &quot;Value '&quot; field &quot;' is outside the legal range &quot;
-                                &quot;(min: &quot; min &quot;, max: &quot; max &quot;)&quot;)))))))</pre></td></tr><tr><td class="docs"><p><code>ip-address</code> is a parse function that will parse an IP version 4 or IP
-  version 6 address, an optional TTL value and an optional address count from
-  the <code>field</code>. The string must be in the format</p>
+                                &quot;(min: &quot; min &quot;, max: &quot; max &quot;)&quot;)))))))</pre></td></tr><tr><td class="docs"><p><code>ip4-address</code> is a regular expression that will match an IPv4 address.</p>
+</td><td class="codes"><pre class="brush: clojure">(def ip4-address
+  #&quot;^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$&quot;)</pre></td></tr><tr><td class="docs"><p><code>multicast?</code> is a utility function that, given an IP <code>address</code> string, will
+  return true if <code>address</code> is a multicast address.</p>
+</td><td class="codes"><pre class="brush: clojure">(defn multicast?
+  [address]
+  (-&gt; address
+      java.net.InetAddress/getByName
+      .isMulticastAddress))</pre></td></tr><tr><td class="docs"><p><code>address</code> is a parse function that will parse an IP version 4 address with
+  an optional TTL value and an optional address count, an IP version 6 address
+  with, an optional address count, or a fully qualified domain name from the
+  <code>field</code>. The string must be in the format</p>
 
-<pre><code>&lt;ip-address&gt;[/ttl][/address-count]
+<pre><code>&lt;address&gt;[/ttl][/address-count]
 </code></pre>
 
 <p>  and is parsed into the structure</p>
 
-<pre><code>{:address java.net.Inet[4|6]Address
- :ttl ttl
- :address-count address-count}
+<pre><code>{:address string
+ :ttl integer
+ :address-count integer}
 </code></pre>
 
 <p>  with the presence of the <code>:ttl</code> and <code>:address-count</code> keys being conditional
-  upon their presence in the input string. If parsing fails an exception is
-  thrown.</p>
-</td><td class="codes"><pre class="brush: clojure">(defn ip-address
+  upon their presence in the input string.</p>
+</td><td class="codes"><pre class="brush: clojure">(defn address
   [field]
-  (let [[ip ttl address-count] (string/split field #&quot;/&quot; 3)
-        address (java.net.InetAddress/getByName ip)
-        result {:address address}
-        IPv4 java.net.Inet4Address
-        IPv6 java.net.Inet6Address]
-    (match [(class address) ttl address-count]
-      [IPv4 nil nil]   (if (.isMulticastAddress address)
-                         (throw (Exception. (str &quot;Multicast IPv4 address &quot;
-                                                 &quot;requires a TTL value&quot;)))
+  (let [[address ttl address-count] (string/split field #&quot;/&quot; 3)
+        address-type (cond
+                       (re-matches ip4-address address) :IPv4
+                       (re-matches #&quot;.*:.*&quot; address) :IPv6
+                       :else :FQDN)
+        result {:address address}]
+    (match [address-type ttl address-count]
+      [:IPv4 nil nil]   (if (multicast? address)
+                          (throw (Exception. (str &quot;Multicast IPv4 address &quot;
+                                                  &quot;requires a TTL value&quot;)))
                          result)
-      [IPv4 ttl nil]   (assoc result :ttl ((integer-in-range 0 255) ttl))
-      [IPv4 ttl count] (assoc result :ttl ((integer-in-range 0 255) ttl)
-                                     :address-count (Integer. count))
-      [IPv6 nil nil]   result
-      [IPv6 count nil] (assoc result :address-count (Integer. count))
-      [IPv6 _ _]       (throw (Exception. &quot;TTL value not allowed for IPv6&quot;)))))</pre></td></tr><tr><td class="docs"><p>The <code>parse-fns</code> structure specifies which parse function should be used to
+      [:IPv4 ttl nil]   (assoc result :ttl ((integer-in-range 0 255) ttl))
+      [:IPv4 ttl count] (assoc result :ttl ((integer-in-range 0 255) ttl)
+                                      :address-count (Integer. count))
+      [:IPv6 nil nil]   result
+      [:IPv6 count nil] (assoc result :address-count (Integer. count))
+      [:IPv6 _ _]       (throw (Exception. &quot;TTL value not allowed for IPv6&quot;))
+      [:FQDN nil nil]   result
+      [:FQDN _ _]       (throw (Exception. &quot;TTL value not allowed for FQDN&quot;)))))</pre></td></tr><tr><td class="docs"><p>The <code>parse-fns</code> structure specifies which parse function should be used to
   parse each field type. The functions specified here can be overriden by the
   user with the <code>custom-parser-for!</code> API function.</p>
 </td><td class="codes"><pre class="brush: clojure">(def ^:dynamic parse-fns
@@ -3465,7 +3476,7 @@ atomic fields.</p>
    :instant bigint
    :duration identity
    :host identity
-   :ip-address ip-address
+   :address address
    :email identity
    :phone identity
    :port (integer-in-range 0 65535)})</pre></td></tr><tr><td class="docs"><h3>Error Functions</h3>
