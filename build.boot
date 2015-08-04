@@ -1,7 +1,6 @@
 ;; Project configuration for Session Description Protocol library.
 (set-env!
  :resource-paths #{"src"}
- :source-paths #{"test"}
  :dependencies '[[org.clojure/clojure "1.7.0"]
                  [org.clojure/core.match "0.3.0-alpha4"]
                  [org.clojure/tools.logging "0.3.1"]
@@ -9,8 +8,6 @@
                  ;; Dev dependencies
                  [it.frbracch/boot-marginalia "LATEST" :scope "test"]
                  [adzerk/boot-test "LATEST" :scope "test"]])
-
-(require '[adzerk.boot-test :refer :all])
 
 (task-options!
  pom
@@ -32,6 +29,14 @@
   "Build the project jar file"
   []
   (comp (pom) (jar)))
+
+(deftask tests
+  "Run the automated tests"
+  []
+  (require 'adzerk.boot-test)
+  (let [run-tests (resolve 'adzerk.boot-test/test)]
+    (set-env! :source-paths #{"test"})
+    (run-tests)))
 
 (deftask doc
   "Generate the project documentation"
