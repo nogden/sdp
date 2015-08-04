@@ -12,7 +12,7 @@
 (task-options!
  pom
  {:project 'multimedia.streaming/sdp
-  :version "0.1.0-SNAPSHOT"
+  :version "0.1.1-SNAPSHOT"
   :description "A parser and emitter for the Session Description Protocol (SDP)
                 as described by RFC 4566."
   :url "http://nogden.github.io/sdp/"
