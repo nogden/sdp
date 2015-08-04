@@ -7,8 +7,10 @@
                  [org.clojure/tools.logging "0.3.1"]
                  [dire "0.5.3"]
                  ;; Dev dependencies
-                 [boot/core "2.1.2" :scope "provided"]
-                 [it.frbracch/boot-marginalia "LATEST" :scope "test"]])
+                 [it.frbracch/boot-marginalia "LATEST" :scope "test"]
+                 [adzerk/boot-test "LATEST" :scope "test"]])
+
+(require '[adzerk.boot-test :refer :all])
 
 (task-options!
  pom
@@ -37,5 +39,3 @@
   (require 'it.frbracch.boot-marginalia)
   (let [marginalia (resolve 'it.frbracch.boot-marginalia/marginalia)]
     (marginalia :file "sdp.html")))
-
-(require '[task :refer [tests]])

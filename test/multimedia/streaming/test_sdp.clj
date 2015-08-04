@@ -1,9 +1,10 @@
-(ns task
-  (:require [boot.core :refer [deftask]]
+(ns multimedia.streaming.test-sdp
+  (:require [clojure.test :refer :all]
             [clojure.java.io :as io]
             [multimedia.streaming.sdp :as sdp]))
 
-(defn- try-parse
+(defn try-parse
+  "Attempt to parse the contents of `file` as SDP."
   [file]
   (let [result {:file (str file)}]
     (try (assoc result :passed true
@@ -12,16 +13,12 @@
         (assoc result :passed false
                       :result e)))))
 
-(deftask tests
-  "Run the automated tests"
+(deftest parse-files-in-sdp-files-directory
+  "Attempt to parse all tests in the sdp-files directory"
   []
-  (print "Running tests... ")
-  (flush)
   (let [sdp-files (.listFiles (io/file "test/sdp-files"))
         results (map try-parse sdp-files)
         pass-count (count (filter :passed results))
         test-count (count results)]
-    (println pass-count " of " test-count " passed\n")
-    (when (< pass-count test-count)
-      (doseq [failed (remove :passed results)]
-        (println "FAILED: " (:file failed) "\n" (:result failed) "\n\n")))))
+    (is (= pass-count test-count)
+        "All descriptions in 'test/sdp-files' should parse successfully")))
